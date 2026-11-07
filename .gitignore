@@ -1,0 +1,20 @@
+# Unreal build / cache output
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+.vs/
+*.sln
+*.VC.db
+*.opensdf
+*.sdf
+*.suo
+
+# Third-party marketplace packs (re-download from Fab) and their archives
+Content/AlienOceanEnvironment/
+Content/Luxury_Restaurant_Pack/
+Content/*.zip
+
+# Raw source art / downloads (kept locally)
+SourceArt/
+Model/
