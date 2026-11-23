@@ -110,6 +110,8 @@ public:
 	TWeakObjectPtr<ARestaurantCustomer> CarryFor;
 	float CarryScore = 0.f, CarryMult = 1.f;
 	int32 CarryDish = -1;
+	bool bCarryPrime = false;      // made with a prime catch
+	int32 CarryMain = 0, CarrySide = 0;   // seasoning / garnish actually used
 	bool IsCarrying() const { return CarryFor.IsValid(); }
 	ARestaurantCustomer* GetCarryTarget() const { return CarryFor.Get(); }
 	void TakeOrder(ARestaurantCustomer* C);
@@ -152,7 +154,7 @@ public:
 	// Papa's-style counter (the cooking UI)
 	FKitchenCounter Counter;
 	float NightClock = 0.f;
-	void CompleteDish(ARestaurantCustomer* C, float Score, bool bTakeFish);
+	void CompleteDish(ARestaurantCustomer* C, float Score, bool bTakeFish, bool bPrime = false);
 	int32 GetRemaining() const { return ToSpawn + Customers.Num(); }
 	void GetCustomers(TArray<ARestaurantCustomer*>& Out) const;
 

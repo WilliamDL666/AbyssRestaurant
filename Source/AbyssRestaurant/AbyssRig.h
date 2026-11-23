@@ -35,6 +35,9 @@ struct ABYSSRESTAURANT_API FAbyssRig
 
 enum class EChefWork : uint8 { None, Chop, Stir, Plate };
 
+// What a seated guest is doing
+enum class EGuestMood : uint8 { Waiting, Calling, Eating, Angry };
+
 namespace AbyssRig
 {
 	// Put a skeletal mesh on a poseable component: scaled to Height, feet on the parent origin, facing parent +X.
@@ -42,4 +45,7 @@ namespace AbyssRig
 
 	// Walk cycle / idle breathing / kitchen work on top of the T-pose.
 	ABYSSRESTAURANT_API void Humanoid(FAbyssRig& R, float Time, float Walk01, EChefWork Work, float WorkBlend, float Hold01 = 0.f);
+
+	// Seated at a table: thighs level, shins down, forearms on the table, plus the guest's mood.
+	ABYSSRESTAURANT_API void Seated(FAbyssRig& R, float Time, EGuestMood Mood, float MoodTime);
 }

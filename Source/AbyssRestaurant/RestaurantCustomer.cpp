@@ -3,6 +3,9 @@
 #include "AbyssAssets.h"
 #include "AbyssTypes.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/PoseableMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
+#include "Materials/MaterialInstanceDynamic.h"
 
 ARestaurantCustomer::ARestaurantCustomer()
 {
@@ -10,6 +13,10 @@ ARestaurantCustomer::ARestaurantCustomer()
 	SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("Root")));
 	Body = CreateDefaultSubobject<USceneComponent>(TEXT("Body"));
 	Body->SetupAttachment(GetRootComponent());
+	GuestMesh = CreateDefaultSubobject<UPoseableMeshComponent>(TEXT("GuestMesh"));
+	GuestMesh->SetupAttachment(Body);
+	GuestMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	GuestMesh->SetVisibility(false);
 }
 
 void ARestaurantCustomer::Init(ARestaurantDome* InDome, int32 InSeat, int32 InDish, const FVector& InTableWorld, float InPatience, int32 Look)
@@ -30,6 +37,21 @@ void ARestaurantCustomer::Init(ARestaurantDome* InDome, int32 InSeat, int32 InDi
 	static const FLinearColor Hair[] = {
 		FLinearColor(0.02f, 0.015f, 0.01f), FLinearColor(0.20f, 0.10f, 0.04f), FLinearColor(0.5f, 0.4f, 0.25f) };
 
+	// --- the Tripo guest: seated, hips on the chair seat, facing the table
+	if (USkeletalMesh* SK = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Abyss/Customer/SK_Customer.SK_Customer"), nullptr, LOAD_NoWarn | LOAD_Quiet))
+	{
+		const float Height = 162.f * FMath::FRandRange(0.96f, 1.04f);
+		UMaterialInterface* M = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Abyss/Customer/M_Customer.M_Customer"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+		if (AbyssRig::FitHumanoid(GuestMesh, SK, Height, M))
+		{
+			// hips are ~54% of the height up; sitting puts them on a ~50 cm seat
+			const FVector L = GuestMesh->GetRelativeLocation();
+			GuestMesh->SetRelativeLocation(FVector(-8.f, 0.f, L.Z - (Height * 0.54f - 50.f)));
+			bModel = Rig.Init(GuestMesh);
+			Body->SetRelativeScale3D(FVector(0.01f));
+			return;
+		}
+	}
 	UMaterialInterface* ClothM = Lit(this, Clothes[Look % 6], 0.8f);
 	UMaterialInterface* SkinM = Lit(this, Skin[(Look / 2) % 3], 0.55f);
 	UMaterialInterface* HairM = Lit(this, Hair[(Look / 3) % 3], 0.6f);
@@ -56,7 +78,7 @@ void ARestaurantCustomer::Init(ARestaurantDome* InDome, int32 InSeat, int32 InDi
 
 FVector ARestaurantCustomer::GetBubbleLocation() const
 {
-	return GetActorLocation() + FVector(0.f, 0.f, 185.f);
+	return GetActorLocation() + FVector(0.f, 0.f, bModel ? 150.f : 185.f);
 }
 
 void ARestaurantCustomer::Serve(float InQuality)
@@ -70,8 +92,8 @@ void ARestaurantCustomer::Serve(float InQuality)
 	const FVector Rel = GetActorTransform().InverseTransformPosition(FMath::Lerp(GetActorLocation(), TableWorld, 0.55f));
 	const FVector PlateLoc(Rel.X, Rel.Y, 88.f);
 	// Blender-made dish (Scripts/blender_make_food.py), falls back to primitives
-	static const TCHAR* DishMeshes[] = { TEXT("SM_Dish_Nigiri"), TEXT("SM_Dish_Tuna"), TEXT("SM_Dish_Grouper"), TEXT("SM_Dish_Kelp") };
-	const FString DishPath = FString::Printf(TEXT("/Game/Abyss/Food/%s.%s"), DishMeshes[FMath::Clamp(Dish, 0, 3)], DishMeshes[FMath::Clamp(Dish, 0, 3)]);
+	static const TCHAR* DishMeshes[] = { TEXT("SM_Dish_Nigiri"), TEXT("SM_Dish_Tuna"), TEXT("SM_Dish_Grouper"), TEXT("SM_Dish_Kelp"), TEXT("SM_Dish_Stew") };
+	const FString DishPath = FString::Printf(TEXT("/Game/Abyss/Food/%s.%s"), DishMeshes[FMath::Clamp(Dish, 0, 4)], DishMeshes[FMath::Clamp(Dish, 0, 4)]);
 	if (UStaticMesh* DM = LoadObject<UStaticMesh>(nullptr, *DishPath, nullptr, LOAD_NoWarn | LOAD_Quiet))
 	{
 		const float Yaw = (FVector(Rel.X, Rel.Y, 0.f)).Rotation().Yaw + 90.f;
@@ -99,6 +121,17 @@ void ARestaurantCustomer::Tick(float Dt)
 	Super::Tick(Dt);
 	StateTime += Dt;
 	Phase += Dt;
+
+	if (bModel)
+	{
+		if (!Rig.bReady) Rig.Init(GuestMesh);
+		EGuestMood Mood = EGuestMood::Waiting;
+		if (State == ECustomerState::Ordering) Mood = EGuestMood::Calling;
+		else if (State == ECustomerState::Eating) Mood = EGuestMood::Eating;
+		else if (State == ECustomerState::Leaving && bAngry) Mood = EGuestMood::Angry;
+		else if (IsWaitingForFood() && Patience01() < 0.25f) Mood = EGuestMood::Angry;
+		AbyssRig::Seated(Rig, Phase, Mood, StateTime);
+	}
 
 	switch (State)
 	{

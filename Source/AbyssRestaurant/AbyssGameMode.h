@@ -10,6 +10,7 @@ class ARestaurantDome;
 class ASubmarinePawn;
 class ADiverPawn;
 class ARestaurantWalker;
+class AAbyssBait;
 
 // Owns the day loop: Explore (sub + diver) -> Restaurant (night service, separate interior space)
 // -> Summary (upgrades) -> next day.
@@ -29,6 +30,42 @@ public:
 	int32 Money = 200;
 	int32 Day = 1;
 	int32 Stock[AbyssData::NumFish] = {};
+	// how many of Stock[] are prime catches (sell for more)
+	int32 Prime[AbyssData::NumFish] = {};
+
+	// --- pantry: seasonings + fresh garnishes bought before opening
+	// [id][nights left - 1]; things that never spoil sit in [0]
+	int32 Pantry[AbyssData::NumSeason][AbyssData::MaxShelf] = {};
+	int32 BoughtNow[AbyssData::NumSeason] = {};   // bought during this prep (can still be returned)
+	int32 MenuMain[AbyssData::NumDishes] = {};    // tonight's seasoning per dish (ESeason, 0 = house style)
+	int32 MenuSide[AbyssData::NumDishes] = {};    // tonight's garnish per dish
+	ETaste TonightTaste = ETaste::Salty;          // what most of tonight's guests fancy
+	int32 SpoiledLastNight = 0;
+	static constexpr int32 PantryCapacity = 30;
+	int32 SeasonCount(int32 Id) const;
+	int32 SeasonExpiring(int32 Id) const;         // portions that spoil after tonight
+	int32 PantryCount() const;
+	bool BuySeason(int32 Id);
+	bool ReturnSeason(int32 Id);
+	bool UseSeason(int32 Id);
+	void CycleMenu(int32 Dish, int32 Slot, int32 Dir);
+	// what a dish sells for with tonight's menu (before the cooking score)
+	int32 DishFinalPrice(int32 Dish, bool bPrimeFish, int32 Main, int32 Side) const;
+	void OpenRestaurant();                        // prep -> service
+
+	// --- bait for luring groupers
+	int32 Bait = 2;
+	int32 BaitBoughtNow = 0;
+	static constexpr int32 BaitCost = 15;
+	static constexpr int32 MaxBait = 6;
+	bool BuyBait();
+	bool ReturnBait();
+	bool DropBait(const FVector& At);
+	bool GetBait(FVector& Out) const;
+
+	FVector2D PrepMouse = FVector2D::ZeroVector;   // cursor on the prep screen (hover highlights)
+	int32 NightPrimeServed = 0;
+	int32 NightTasteHits = 0;
 	int32 BatteryLevel = 0;
 	int32 LightLevel = 0;
 	int32 OxygenLevel = 0;
@@ -56,8 +93,9 @@ public:
 	static constexpr int32 MaxUpgrade = 3;
 
 	void ShowToast(const FString& Msg, const FLinearColor& Color = FLinearColor::White, float Duration = 2.5f);
-	bool AddFish(EFishType Type);
-	void TakeFish(int32 Dish);
+	bool AddFish(EFishType Type, bool bPrime = false);
+	// takes one fish out of the fridge; returns true when it was a prime one
+	bool TakeFish(int32 Fish, bool bWantPrime = true);
 	int32 CargoCount() const;
 	float BatterySeconds() const { return 240.f * (1.f + 0.5f * BatteryLevel); }
 	float LightMultiplier() const { return 1.f + 0.35f * LightLevel; }
@@ -97,6 +135,8 @@ private:
 	TWeakObjectPtr<ASubmarinePawn> Sub;
 	TWeakObjectPtr<ADiverPawn> Diver;
 	TWeakObjectPtr<ARestaurantWalker> Walker;
+	TWeakObjectPtr<AAbyssBait> ActiveBait;
+	bool bAutoTestPrepShot = false;
 	bool bPlacedSub = false;
 	// -AbyssAutoTest: scripted playtest that logs state and takes screenshots, then quits
 	bool bAutoTest = false;

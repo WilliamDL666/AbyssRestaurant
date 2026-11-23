@@ -16,6 +16,7 @@ enum class EIngredient : uint8
 	Kelp,
 	Wasabi,
 	Sesame,
+	Stew,      // a ladle of finished stew
 	Count
 };
 
@@ -29,6 +30,11 @@ struct FRecipe
 	float WPrep, WCook, WPlate; // score weights
 	int32 Price;
 	float CookWindow;       // half-width of the flip/finish sweet spot (0..1 of the bar)
+	// what the dish is really about: knife work (many tight cuts), heat control, or the order things go in the pot
+	int32 Cuts = 3;
+	float CutTight = 900.f; // score lost per board-width of error
+	bool bStew = false;
+	const TCHAR* Focus = TEXT("");
 };
 
 namespace AbyssRecipes

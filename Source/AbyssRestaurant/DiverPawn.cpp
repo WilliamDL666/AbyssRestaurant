@@ -443,19 +443,18 @@ void ADiverPawn::GatherNetTargets(TArray<ACatchableFish*>& Out) const
 	Out.Sort([Me](const ACatchableFish& A, const ACatchableFish& B) { return FVector::DistSquared(A.GetActorLocation(), Me) < FVector::DistSquared(B.GetActorLocation(), Me); });
 }
 
-void ADiverPawn::LandFish(ACatchableFish* F, ECatchMethod Method)
+bool ADiverPawn::LandFish(ACatchableFish* F, ECatchMethod Method, bool bPrime)
 {
 	AAbyssGameMode* GM = AAbyssGameMode::Get(this);
-	if (!GM) return;
-	if (GM->AddFish(F->Type))
+	if (!GM) return false;
+	if (GM->AddFish(F->Type, bPrime))
 	{
 		DiveCatch[(int32)F->Type]++;
 		F->OnCaught();
+		return true;
 	}
-	else
-	{
-		GM->ShowToast(TEXT("Cargo hold full - return to the sub [E]"), FLinearColor(1.f, 0.6f, 0.2f));
-	}
+	GM->ShowToast(TEXT("Cargo hold full - return to the sub [E]"), FLinearColor(1.f, 0.6f, 0.2f));
+	return false;
 }
 
 void ADiverPawn::Fire()
@@ -505,8 +504,14 @@ void ADiverPawn::Fire()
 			}
 			else if (F->OnHarpoonHit())
 			{
-				LandFish(F, ECatchMethod::Harpoon);
-				GM->ShowToast(FString::Printf(TEXT("Speared: %s!"), D.Name), FLinearColor(0.4f, 1.f, 0.8f));
+				const bool bPrime = F->PrimeIfCaught(ECatchMethod::Harpoon, 1);
+				const EFishType FT = F->Type;
+				F->Spook(GetActorLocation(), true);   // the rest of the school bolts
+				if (LandFish(F, ECatchMethod::Harpoon, bPrime))
+				{
+					if (bPrime) GM->ShowToast(FString::Printf(TEXT("PRIME catch: %s!  Sells for +35%%"), D.Name), FLinearColor(1.f, 0.85f, 0.3f), 3.f);
+					else GM->ShowToast(FString::Printf(TEXT("Speared: %s (ordinary). %s"), D.Name, AbyssData::PrimeTip(FT)), FLinearColor(0.4f, 1.f, 0.8f), 3.5f);
+				}
 			}
 			else
 			{
@@ -527,8 +532,13 @@ void ADiverPawn::ResolveNet()
 	AAbyssGameMode* GM = AAbyssGameMode::Get(this);
 	TArray<ACatchableFish*> Targets;
 	GatherNetTargets(Targets);
-	int32 Caught = 0;
+	int32 Caught = 0, PrimeN = 0;
 	bool bEscaped = false;
+	// how many fit in this throw decides the quality: a full, calm haul is prime
+	int32 Haul = 0;
+	for (ACatchableFish* F : Targets) if (F->Def().bNet) ++Haul;
+	Haul = FMath::Min(Haul, NetMaxCatch);
+	ACatchableFish* Missed = nullptr;
 	for (ACatchableFish* F : Targets)
 	{
 		if (!F->Def().bNet)
@@ -537,14 +547,35 @@ void ADiverPawn::ResolveNet()
 			bEscaped = true;
 			continue;
 		}
-		if (Caught >= NetMaxCatch) break;
-		LandFish(F, ECatchMethod::Net);
-		++Caught;
+		if (Caught >= NetMaxCatch) { Missed = F; break; }
+		const bool bPrime = F->PrimeIfCaught(ECatchMethod::Net, Haul);
+		if (LandFish(F, ECatchMethod::Net, bPrime))
+		{
+			++Caught;
+			if (bPrime) ++PrimeN;
+		}
 	}
-	if (!GM) return;
+	// whatever the net missed scatters
 	if (Caught > 0)
 	{
-		GM->ShowToast(FString::Printf(TEXT("Netted %d fish!"), Caught), FLinearColor(0.4f, 1.f, 0.8f));
+		for (TActorIterator<ACatchableFish> It(GetWorld()); It; ++It)
+		{
+			if (It->IsCatchable() && It->Def().bNet && FVector::Dist(It->GetActorLocation(), GetActorLocation()) < 1400.f) It->Spook(GetActorLocation(), false);
+		}
+	}
+	(void)Missed;
+	if (!GM) return;
+	if (Caught > 0 && PrimeN > 0)
+	{
+		GM->ShowToast(FString::Printf(TEXT("Clean haul! Netted %d PRIME fish - sells for +35%%"), Caught), FLinearColor(1.f, 0.85f, 0.3f), 3.f);
+	}
+	else if (Caught > 0)
+	{
+		GM->ShowToast(FString::Printf(TEXT("Netted %d fish (ordinary). %s"), Caught, AbyssData::PrimeTip(EFishType::Yellowtail)), FLinearColor(0.4f, 1.f, 0.8f), 3.5f);
+	}
+	else if (Targets.Num() == 0)
+	{
+		GM->ShowToast(TEXT("Missed - let the school settle, then drift in slowly"), FLinearColor(1.f, 0.8f, 0.4f), 2.5f);
 	}
 	else if (bEscaped)
 	{

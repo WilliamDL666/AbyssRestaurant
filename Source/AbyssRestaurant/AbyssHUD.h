@@ -57,5 +57,9 @@ private:
 	void DrawCounter(AAbyssGameMode* GM, class ARestaurantDome* Dome);
 	void DrawCounterItem(const struct FCItem& I, const FVector2D& C, float Size, float Alpha = 1.f, float MaxW = 0.f);
 	void DrawEnding(AAbyssGameMode* GM);
+	void DrawPrep(AAbyssGameMode* GM);
+	// small gold star: marks prime catches
+	void Star(float CX, float CY, float Size, float Alpha = 1.f);
+	void DrawFishHints(AAbyssGameMode* GM, const FVector& From, bool bDiver);
 	void Disc(float CX, float CY, float R, const FLinearColor& C, int32 Seg = 40);
 };

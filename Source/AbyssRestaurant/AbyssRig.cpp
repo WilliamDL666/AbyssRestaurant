@@ -187,3 +187,58 @@ void AbyssRig::Humanoid(FAbyssRig& R, float T, float Walk01, EChefWork Work, flo
 	R.Rot(TEXT("RightForeArm"), Up, -RElbow);
 	R.Commit();
 }
+
+void AbyssRig::Seated(FAbyssRig& R, float T, EGuestMood Mood, float MT)
+{
+	if (!R.bReady) return;
+	const FVector Side(1.f, 0.f, 0.f), Fwd(0.f, 1.f, 0.f), Up(0.f, 0.f, 1.f);
+	R.Begin();
+	// legs: +Side swings a hanging bone forward, -Side bends the knee back
+	R.Rot(TEXT("LeftUpLeg"), Side, 86.f);
+	R.Rot(TEXT("RightUpLeg"), Side, 86.f);
+	R.Rot(TEXT("LeftLeg"), Side, -88.f);
+	R.Rot(TEXT("RightLeg"), Side, -88.f);
+	R.Rot(TEXT("LeftUpLeg"), Up, 5.f);
+	R.Rot(TEXT("RightUpLeg"), Up, -5.f);
+	const float Breath = FMath::Sin(T * 1.6f);
+	R.Rot(TEXT("Spine"), Side, -4.f + Breath * 1.f);
+	// arms down from the T-pose, forearms resting forward on the table
+	R.Rot(TEXT("LeftArm"), Fwd, 72.f);
+	R.Rot(TEXT("RightArm"), Fwd, -72.f);
+	float LF = 38.f, RF = 38.f, LE = 62.f, RE = 62.f;
+	float HeadYaw = 18.f * FMath::Sin(T * 0.45f), HeadPitch = 0.f;
+	switch (Mood)
+	{
+	case EGuestMood::Calling:   // right hand up, waving to get the chef's attention
+		RF = 150.f;
+		RE = 30.f + 20.f * FMath::Sin(T * 7.f);
+		R.Rot(TEXT("RightArm"), Fwd, 22.f * FMath::Sin(T * 7.f));
+		HeadYaw = 0.f;
+		break;
+	case EGuestMood::Eating:    // right hand brings food to the mouth, head bows to the plate
+	{
+		const float Bite = FMath::Max(0.f, FMath::Sin(T * 2.4f));
+		RF = FMath::Lerp(40.f, 75.f, Bite);
+		RE = FMath::Lerp(60.f, 125.f, Bite);
+		HeadPitch = -10.f + 6.f * Bite;
+		HeadYaw = 0.f;
+		break;
+	}
+	case EGuestMood::Angry:     // hands on the hips, shaking the head
+		LF = -10.f; RF = -10.f; LE = 95.f; RE = 95.f;
+		R.Rot(TEXT("LeftArm"), Fwd, -25.f);
+		R.Rot(TEXT("RightArm"), Fwd, 25.f);
+		HeadYaw = 25.f * FMath::Sin(MT * 10.f);
+		break;
+	default:
+		break;
+	}
+	R.Rot(TEXT("LeftArm"), Side, LF);
+	R.Rot(TEXT("RightArm"), Side, RF);
+	R.Rot(TEXT("LeftForeArm"), Up, LE);
+	R.Rot(TEXT("RightForeArm"), Up, -RE);
+	R.Rot(TEXT("Neck"), Side, HeadPitch * 0.4f);
+	R.Rot(TEXT("Head"), Side, HeadPitch * 0.6f);
+	R.Rot(TEXT("Head"), Up, HeadYaw);
+	R.Commit();
+}

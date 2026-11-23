@@ -114,7 +114,7 @@ private:
 	void ResolveNet();
 	void ShowTool();
 	void UpdateBubbles(float Dt);
-	void LandFish(ACatchableFish* F, ECatchMethod Method);
+	bool LandFish(ACatchableFish* F, ECatchMethod Method, bool bPrime);
 
 	// --- procedural skeletal animation
 	struct FBoneRef { int32 Index = INDEX_NONE; int32 Parent = INDEX_NONE; };

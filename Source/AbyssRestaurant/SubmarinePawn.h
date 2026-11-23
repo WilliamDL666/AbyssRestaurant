@@ -67,6 +67,10 @@ public:
 	float GetDepthMeters() const { return FMath::Max(0.f, -GetActorLocation().Z / 100.f); }
 	float GetHeading() const;
 	float GetCatchRange() const;
+	// where the searchlight points (fish react to being lit)
+	FVector GetLightDirection() const;
+	// set while the claw is on a fish: would it be a prime catch right now?
+	bool bTargetPrime = false;
 	bool IsInDockZone() const;
 	bool CanDiveOut() const { return GetVelocity().Size() < 250.f && !IsInDockZone(); }
 	bool bHasCustomHull = false;
@@ -106,6 +110,7 @@ private:
 	void BoostReleased() { bBoost = false; }
 	void ToggleLight();
 	void Interact();
+	void DropBait();
 
 	void UpdateTarget(float Dt);
 	void UpdateSnow(float Dt);

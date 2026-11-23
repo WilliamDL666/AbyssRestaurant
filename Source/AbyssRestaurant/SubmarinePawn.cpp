@@ -298,6 +298,22 @@ void ASubmarinePawn::SetupPlayerInputComponent(UInputComponent* IC)
 	IC->BindAction(TEXT("Boost"), IE_Released, this, &ASubmarinePawn::BoostReleased);
 	IC->BindAction(TEXT("ToggleLight"), IE_Pressed, this, &ASubmarinePawn::ToggleLight);
 	IC->BindAction(TEXT("Interact"), IE_Pressed, this, &ASubmarinePawn::Interact);
+	IC->BindAction(TEXT("Bait"), IE_Pressed, this, &ASubmarinePawn::DropBait);
+}
+
+FVector ASubmarinePawn::GetLightDirection() const
+{
+	return Headlight ? Headlight->GetForwardVector() : GetActorForwardVector();
+}
+
+void ASubmarinePawn::DropBait()
+{
+	if (!bControlsEnabled) return;
+	if (AAbyssGameMode* GM = AAbyssGameMode::Get(this))
+	{
+		// tossed out ahead of the sub; it sinks to the seabed
+		GM->DropBait(GetActorLocation() + GetLightDirection() * 900.f - FVector(0.f, 0.f, 120.f));
+	}
 }
 
 void ASubmarinePawn::Turn(float V)
@@ -451,12 +467,13 @@ void ASubmarinePawn::UpdateTarget(float Dt)
 	AAbyssGameMode* GM = AAbyssGameMode::Get(this);
 	const FVector Lamp = Headlight->GetComponentLocation();
 	const FVector Dir = Headlight->GetForwardVector();
-	const float Range = GetCatchRange();
+	// running dark: the claw still works, but only up close
+	const float Range = GetCatchRange() * (bLightOn ? 1.f : 0.6f);
 	const float CosCone = FMath::Cos(FMath::DegreesToRadians(CatchConeDegrees));
 
 	ACatchableFish* Best = nullptr;
 	float BestScore = -1.f;
-	if (bControlsEnabled && bLightOn)
+	if (bControlsEnabled)
 	{
 		for (TActorIterator<ACatchableFish> It(GetWorld()); It; ++It)
 		{
@@ -502,13 +519,17 @@ void ASubmarinePawn::UpdateTarget(float Dt)
 		else
 		{
 			Target->SetBeingCaught(true);
-			CatchProgress += Dt / Target->Def().CatchTime;
+			// a calm fish is an easy grab; one that is fleeing fights the claw all the way
+			bTargetPrime = Target->PrimeIfCaught(ECatchMethod::SubClaw, 1);
+			CatchProgress += Dt / Target->Def().CatchTime * (Target->IsCalm() ? 2.4f : 1.f);
 			if (CatchProgress >= 1.f)
 			{
 				const FFishDef& D = Target->Def();
-				if (GM && GM->AddFish(Target->Type))
+				const bool bPrime = bTargetPrime;
+				if (GM && GM->AddFish(Target->Type, bPrime))
 				{
-					GM->ShowToast(FString::Printf(TEXT("Caught: %s  (+1 %s)"), D.Name, D.Dish), FLinearColor(0.4f, 1.f, 0.8f));
+					if (bPrime) GM->ShowToast(FString::Printf(TEXT("PRIME catch: %s!  Sells for +35%%"), D.Name), FLinearColor(1.f, 0.85f, 0.3f), 3.f);
+					else GM->ShowToast(FString::Printf(TEXT("Caught: %s (ordinary) - it was spooked. %s"), D.Name, AbyssData::PrimeTip(Target->Type)), FLinearColor(0.4f, 1.f, 0.8f), 4.f);
 				}
 				Target->OnCaught();
 				Target = nullptr;

@@ -588,7 +588,8 @@ int32 ARestaurantDome::PickDish() const
 	}
 	for (const ARestaurantCustomer* C : Customers)
 	{
-		if (IsValid(C) && C->IsWaitingForFood() && C->Dish < AbyssData::NumFish) Avail[C->Dish]--;
+		const int32 Fish = IsValid(C) ? AbyssData::DishFish(C->Dish) : -1;
+		if (Fish >= 0 && (C->IsWaitingForFood() || C->WantsToOrder())) Avail[Fish]--;
 	}
 	for (int32 i = 0; i < AbyssData::NumFish; ++i)
 	{
@@ -599,7 +600,8 @@ int32 ARestaurantDome::PickDish() const
 	int32 Pick = FMath::RandRange(0, Total - 1);
 	for (int32 i = 0; i < AbyssData::NumFish; ++i)
 	{
-		if (Pick < Avail[i]) return i;
+		// yellowtail goes into two dishes: nigiri (knife work) or the kelp stew (timing the pot)
+		if (Pick < Avail[i]) return i == (int32)EFishType::Yellowtail && FMath::FRand() < 0.45f ? AbyssData::StewDish : i;
 		Pick -= Avail[i];
 	}
 	return AbyssData::SaladDish;
@@ -622,6 +624,12 @@ void ARestaurantDome::SpawnCustomer()
 	ARestaurantCustomer* C = GetWorld()->SpawnActor<ARestaurantCustomer>(ARestaurantCustomer::StaticClass(), T);
 	if (!C) return;
 	C->Init(this, SeatIdx, PickDish(), GetActorTransform().TransformPosition(S.Table), BasePatience + FMath::FRandRange(0.f, 25.f), FMath::RandRange(0, 17));
+	// most guests follow tonight's craving, some have their own taste, a few don't care
+	{
+		const AAbyssGameMode* GMT = AAbyssGameMode::Get(this);
+		const float Roll = FMath::FRand();
+		C->Taste = Roll < 0.55f && GMT ? GMT->TonightTaste : Roll < 0.88f ? (ETaste)FMath::RandRange((int32)ETaste::Salty, (int32)ETaste::Fresh) : ETaste::None;
+	}
 	Seats[SeatIdx].Occupant = C;
 	Customers.Add(C);
 	--ToSpawn;
@@ -664,9 +672,9 @@ void ARestaurantDome::SelectOrder(int32 QueueIndex)
 	if (!Queue.IsValidIndex(QueueIndex)) return;
 
 	ARestaurantCustomer* C = Queue[QueueIndex];
-	if (C->Dish < AbyssData::NumFish && GM->Stock[C->Dish] <= 0)
+	if (AbyssData::DishFish(C->Dish) >= 0 && GM->Stock[AbyssData::DishFish(C->Dish)] <= 0)
 	{
-		GM->ShowToast(FString::Printf(TEXT("Out of %s! Catch more tomorrow."), AbyssData::Fish((EFishType)C->Dish).Name), FLinearColor(1.f, 0.4f, 0.3f));
+		GM->ShowToast(FString::Printf(TEXT("Out of %s! Catch more tomorrow."), AbyssData::Fish((EFishType)AbyssData::DishFish(C->Dish)).Name), FLinearColor(1.f, 0.4f, 0.3f));
 		return;
 	}
 	Cooking = C;
@@ -693,7 +701,7 @@ void ARestaurantDome::FinishDish()
 	CompleteDish(C, Score, true);
 }
 
-void ARestaurantDome::CompleteDish(ARestaurantCustomer* C, float Score, bool bTakeFish)
+void ARestaurantDome::CompleteDish(ARestaurantCustomer* C, float Score, bool bTakeFish, bool bPrime)
 {
 	AAbyssGameMode* GM = AAbyssGameMode::Get(this);
 	if (!GM || !C) return;
@@ -721,7 +729,13 @@ void ARestaurantDome::CompleteDish(ARestaurantCustomer* C, float Score, bool bTa
 	}
 	ResultTime = 1.6f;
 
-	if (bTakeFish) GM->TakeFish(C->Dish);
+	if (bTakeFish) bPrime = GM->TakeFish(AbyssData::DishFish(C->Dish));
+	// tonight's seasoning + garnish go on as the dish leaves the pass (if the pantry still has some)
+	bCarryPrime = bPrime;
+	CarryMain = GM->MenuMain[FMath::Clamp(C->Dish, 0, AbyssData::NumDishes - 1)];
+	CarrySide = GM->MenuSide[FMath::Clamp(C->Dish, 0, AbyssData::NumDishes - 1)];
+	if (CarryMain > 0 && !GM->UseSeason(CarryMain)) CarryMain = 0;
+	if (CarrySide > 0 && !GM->UseSeason(CarrySide)) CarrySide = 0;
 	CarryFor = C;
 	CarryScore = Score;
 	CarryMult = Mult;
@@ -736,19 +750,29 @@ void ARestaurantDome::DeliverDish()
 	ARestaurantCustomer* C = CarryFor.Get();
 	CarryFor = nullptr;
 	if (!GM || !C) return;
-	const int32 Price = AbyssData::DishPrice(CarryDish);
+	// catch quality + seasoning + garnish set the price; the cooking score scales it
+	const int32 Price = GM->DishFinalPrice(CarryDish, bCarryPrime, CarryMain, CarrySide);
 	const int32 Earned = FMath::RoundToInt(Price * CarryMult);
+	// the guest's taste: a matching seasoning or garnish doubles the tip
+	const bool bTaste = C->Taste != ETaste::None && (AbyssData::Season(CarryMain).Taste == C->Taste || AbyssData::Season(CarrySide).Taste == C->Taste);
 	// served while the guest is still happy -> tip
-	const int32 Tip = FMath::RoundToInt(Price * 0.35f * C->Patience01() * (CarryScore >= 70.f ? 1.f : 0.3f));
+	int32 Tip = FMath::RoundToInt(Price * 0.35f * C->Patience01() * (CarryScore >= 70.f ? 1.f : 0.3f));
+	if (bTaste) Tip = Tip * 2 + FMath::RoundToInt(Price * 0.1f);
 	GM->Money += Earned + Tip;
 	GM->NightEarned += Earned + Tip;
 	GM->NightServed++;
 	GM->LifetimeServed++;
-	GM->Satisfaction = FMath::Lerp(GM->Satisfaction, CarryScore / 100.f, 0.25f);
-	if (Tip > 0)
-		GM->ShowToast(FString::Printf(TEXT("+%d  %s   (tip +%d)"), Earned, *AbyssData::DishName(CarryDish), Tip), FLinearColor(1.f, 0.85f, 0.3f), 1.8f);
-	else
-		GM->ShowToast(FString::Printf(TEXT("+%d  %s"), Earned, *AbyssData::DishName(CarryDish)), FLinearColor(1.f, 0.85f, 0.3f), 1.6f);
+	if (bCarryPrime) GM->NightPrimeServed++;
+	if (bTaste) GM->NightTasteHits++;
+	GM->Satisfaction = FMath::Lerp(GM->Satisfaction, FMath::Min(1.f, CarryScore / 100.f + (bTaste ? 0.1f : 0.f)), 0.25f);
+	{
+		FString Msg = FString::Printf(TEXT("+%d  %s"), Earned, *AbyssData::DishName(CarryDish));
+		if (bCarryPrime) Msg += TEXT("  [PRIME]");
+		if (Tip > 0) Msg += FString::Printf(TEXT("   (tip +%d)"), Tip);
+		if (bTaste) Msg += TEXT("  Just my taste!");
+		GM->ShowToast(Msg, bTaste ? FLinearColor(0.6f, 1.f, 0.6f) : FLinearColor(1.f, 0.85f, 0.3f), 2.2f);
+	}
+	C->bTasteHit = bTaste;
 	C->Serve(CarryScore / 100.f);
 	CarryDish = -1;
 }
@@ -808,24 +832,57 @@ void ARestaurantDome::Tick(float Dt)
 		SharkPivot->SetRelativeLocation(FVector(0.f, 0.f, FMath::Sin(Time * 0.3f) * 120.f));
 	}
 
-	// the exterior copy's ~100 lamps would light up the underwater volumetric fog into a glowing blob
-	if (!bLuxLightsTamed && LuxExteriorLevel.IsValid() && LuxExteriorLevel->GetLoadedLevel())
+	// --- performance: trim the streamed restaurant copies (the full showcase twice exhausted VRAM)
+	if (!bLuxLightsTamed && bUseLuxLevel)
 	{
-		bLuxLightsTamed = true;
-		int32 N = 0;
-		for (AActor* A : LuxExteriorLevel->GetLoadedLevel()->Actors)
+		ULevel* Target = nullptr;
+		if (!bInteriorSpace)
 		{
-			if (!A) continue;
-			TArray<ULightComponent*> Lights;
-			A->GetComponents(Lights);
-			for (ULightComponent* L : Lights)
+			if (LuxExteriorLevel.IsValid()) Target = LuxExteriorLevel->GetLoadedLevel();
+		}
+		else
+		{
+			for (TActorIterator<AStaticMeshActor> It(GetWorld()); It && !Target; ++It)
 			{
-				L->SetVolumetricScatteringIntensity(0.f);
-				L->SetIntensity(L->Intensity * 0.6f);
-				++N;
+				if (FVector::Dist2D(It->GetActorLocation(), GetActorLocation()) < Radius && It->GetLevel() != GetLevel()) Target = It->GetLevel();
 			}
 		}
-		UE_LOG(LogTemp, Log, TEXT("Lux exterior copy: %d lights tamed"), N);
+		if (Target)
+		{
+			bLuxLightsTamed = true;
+			int32 NL = 0, NHidden = 0, NCull = 0;
+			for (AActor* A : Target->Actors)
+			{
+				if (!A) continue;
+				TArray<ULightComponent*> Lights;
+				A->GetComponents(Lights);
+				for (ULightComponent* Lc : Lights)
+				{
+					if (!bInteriorSpace) Lc->SetVisibility(false);   // seen from outside the glass: the dome's own glow is enough
+					else { Lc->SetCastShadows(false); Lc->SetVolumetricScatteringIntensity(0.f); }
+					++NL;
+				}
+				TArray<UStaticMeshComponent*> Meshes;
+				A->GetComponents(Meshes);
+				for (UStaticMeshComponent* M : Meshes)
+				{
+					const float R = M->Bounds.SphereRadius;
+					if (!bInteriorSpace)
+					{
+						M->SetCastShadow(false);
+						if (R < 70.f) { M->SetVisibility(false); M->SetHiddenInGame(true); ++NHidden; }
+					}
+					else if (R < 40.f)
+					{
+						// tableware / bottles: only drawn up close, no shadows
+						M->SetCachedMaxDrawDistance(1800.f);
+						M->SetCastShadow(false);
+						++NCull;
+					}
+				}
+			}
+			UE_LOG(LogTemp, Log, TEXT("Lux %s copy trimmed: %d lights, %d hidden, %d distance-culled"), bInteriorSpace ? TEXT("interior") : TEXT("exterior"), NL, NHidden, NCull);
+		}
 	}
 
 	// jellyfish lamps drift gently
@@ -1714,7 +1771,7 @@ bool ARestaurantDome::BuildLuxInterior()
 					if (J) J->ComponentTags.Add(TEXT("JellyLamp"));
 				}
 				// a light on every other lamp (keeps the light count sane)
-				if (k % 2 == 0) AddPointLight(this, Root, P - FVector(0.f, 0.f, 60.f), FLinearColor(1.f, 0.68f, 0.62f), 40.f * LS, 650.f, false);
+				if (bInteriorSpace && k % 2 == 0) AddPointLight(this, Root, P - FVector(0.f, 0.f, 60.f), FLinearColor(1.f, 0.68f, 0.62f), 40.f * LS, 650.f, false);
 				++L;
 			}
 		}
@@ -1736,7 +1793,7 @@ bool ARestaurantDome::BuildLuxInterior()
 				AbyssAssets::AddPart(this, Root, CoralMs[c], Dir * R, FRotator(0.f, k * 53.f, 0.f), FVector(c == 2 ? 1.4f : 2.4f), CoralMats[c], false);
 				if (CoralMs[2] && c != 2) AbyssAssets::AddPart(this, Root, CoralMs[2], Dir * (R + 90.f) + FRotator(0.f, 90.f, 0.f).RotateVector(Dir) * 70.f, FRotator(0.f, k * 31.f, 0.f), FVector(0.8f), CoralMats[(c + 1) % 3], false);
 			}
-			if (k % 3 == 0) AddPointLight(this, Root, Dir * (Radius - 220.f) + FVector(0.f, 0.f, 120.f), Accents[(k / 3) % 3], 70.f * LS, 900.f, false);
+			if (k % 3 == 0 && (bInteriorSpace || k % 6 == 0)) AddPointLight(this, Root, Dir * (Radius - 220.f) + FVector(0.f, 0.f, 120.f), Accents[(k / 3) % 3], 70.f * LS, 900.f, false);
 		}
 		UE_LOG(LogTemp, Log, TEXT("Dreamy pass: %d jelly lamps, %d corals"), L, NC);
 		if (JellyM)

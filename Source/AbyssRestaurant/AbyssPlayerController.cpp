@@ -6,6 +6,7 @@
 #include "Components/InputComponent.h"
 #include "AbyssLoc.h"
 #include "KitchenGame.h"
+#include "PrepMenu.h"
 #include "InputCoreTypes.h"
 
 void AAbyssPlayerController::BeginPlay()
@@ -82,7 +83,8 @@ void AAbyssPlayerController::PlayerTick(float DeltaTime)
 	AAbyssGameMode* GM = AAbyssGameMode::Get(this);
 	ARestaurantDome* D = GM ? GM->GetDome() : nullptr;
 	const bool bCounter = GM && D && GM->Phase == EAbyssPhase::Restaurant && D->Counter.bOpen;
-	const bool bKitchen = bCounter || (GM && D && GM->Phase == EAbyssPhase::Restaurant && D->Kitchen.bActive && D->Kitchen.bAtStation);
+	const bool bPrep = GM && GM->Phase == EAbyssPhase::Prep;
+	const bool bKitchen = bPrep || bCounter || (GM && D && GM->Phase == EAbyssPhase::Restaurant && D->Kitchen.bActive && D->Kitchen.bAtStation);
 
 	if (bKitchen != bKitchenCursor)
 	{
@@ -107,6 +109,13 @@ void AAbyssPlayerController::PlayerTick(float DeltaTime)
 	GetViewportSize(VW, VH);
 	if (!GetMousePosition(MX, MY) || VW <= 0) return;
 	const FVector2D P(MX, MY);
+	if (bPrep)
+	{
+		// before opening: menu + market are worked with the mouse
+		GM->PrepMouse = P;
+		if (WasInputKeyJustPressed(EKeys::LeftMouseButton)) FPrepLayout::Make((float)VW, (float)VH).Click(GM, P);
+		return;
+	}
 	if (bCounter)
 	{
 		TArray<ARestaurantCustomer*> Q;

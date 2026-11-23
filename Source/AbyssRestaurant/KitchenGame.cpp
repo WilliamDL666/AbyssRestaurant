@@ -10,14 +10,16 @@ namespace AbyssRecipes
 	{
 		using E = EIngredient;
 		static const TArray<FRecipe> R = {
-			// 0: Yellowtail nigiri - slice + plate (rice x2, fish x2, wasabi)
-			{ TEXT("Yellowtail Nigiri"), 0, true, false, { E::Rice, E::Rice, E::FishSlice, E::FishSlice, E::Wasabi }, 0.4f, 0.f, 0.6f, 80, 0.07f },
-			// 1: Tuna teppanyaki - slice + flip/finish + plate (steak, lemon, greens)
-			{ TEXT("Tuna Teppanyaki"), 1, true, true, { E::Steak, E::Lemon, E::Greens }, 0.3f, 0.4f, 0.3f, 160, 0.06f },
-			// 2: Grouper teppanyaki (signature) - narrower cooking window
-			{ TEXT("Grouper Teppanyaki"), 2, true, true, { E::Steak, E::Lemon, E::Greens, E::Sesame }, 0.25f, 0.5f, 0.25f, 520, 0.04f },
+			// 0: Yellowtail nigiri - KNIFE WORK: five thin, even slices decide the dish
+			{ TEXT("Yellowtail Nigiri"), 0, true, false, { E::Rice, E::Rice, E::FishSlice, E::FishSlice, E::Wasabi }, 0.6f, 0.f, 0.4f, 80, 0.07f, 5, 1500.f, false, TEXT("Knife work: 5 thin, straight slices") },
+			// 1: Tuna teppanyaki - HEAT: sear on high, finish gently, flip in time
+			{ TEXT("Tuna Teppanyaki"), 1, true, true, { E::Steak, E::Lemon, E::Greens }, 0.15f, 0.6f, 0.25f, 160, 0.06f, 2, 600.f, false, TEXT("Heat: sear on HIGH, flip, finish on LOW") },
+			// 2: Grouper teppanyaki (signature) - same, with a narrower window
+			{ TEXT("Grouper Teppanyaki"), 2, true, true, { E::Steak, E::Lemon, E::Greens, E::Sesame }, 0.15f, 0.65f, 0.2f, 520, 0.04f, 2, 600.f, false, TEXT("Heat: delicate - a narrow perfect window") },
 			// 3: Kelp salad - no fish, plate only
-			{ TEXT("Kelp Salad"), -1, false, false, { E::Kelp, E::Kelp, E::Sesame }, 0.f, 0.f, 1.f, 30, 0.07f },
+			{ TEXT("Kelp Salad"), -1, false, false, { E::Kelp, E::Kelp, E::Sesame }, 0.f, 0.f, 1.f, 30, 0.07f, 0, 600.f, false, TEXT("Plating only") },
+			// 4: Yellowtail kelp stew - ORDER: kelp first for the stock, then the fish, greens last
+			{ TEXT("Yellowtail Kelp Stew"), 0, true, true, { E::Stew, E::Sesame }, 0.1f, 0.7f, 0.2f, 120, 0.07f, 2, 600.f, true, TEXT("Order: kelp, then fish, then greens - each on time") },
 		};
 		return R;
 	}
@@ -40,6 +42,7 @@ namespace AbyssRecipes
 		case EIngredient::Kelp:      return TEXT("Seaweed");
 		case EIngredient::Wasabi:    return TEXT("Wasabi");
 		case EIngredient::Sesame:    return TEXT("Sesame");
+		case EIngredient::Stew:      return TEXT("Stew");
 		default: return TEXT("?");
 		}
 	}

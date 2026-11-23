@@ -2,6 +2,8 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "AbyssRig.h"
+#include "AbyssTypes.h"
 #include "RestaurantCustomer.generated.h"
 
 class ARestaurantDome;
@@ -34,6 +36,8 @@ public:
 
 	ECustomerState State = ECustomerState::Arriving;
 	int32 Dish = 0;
+	ETaste Taste = ETaste::None;   // a seasoning / garnish with this taste earns a bigger tip
+	bool bTasteHit = false;
 	int32 Seat = -1;
 	float Patience = 30.f;
 	float PatienceMax = 30.f;
@@ -50,6 +54,10 @@ public:
 private:
 	UPROPERTY() TObjectPtr<USceneComponent> Body;
 	UPROPERTY(Transient) TObjectPtr<USceneComponent> Head;
+	// Tripo guest model (falls back to primitives when missing)
+	UPROPERTY(VisibleAnywhere) TObjectPtr<class UPoseableMeshComponent> GuestMesh;
+	FAbyssRig Rig;
+	bool bModel = false;
 	TWeakObjectPtr<ARestaurantDome> Dome;
 	FVector TableWorld;
 	float Phase = 0.f;

@@ -15,7 +15,8 @@ void AFishSpawner::BeginPlay()
 	UWorld* W = GetWorld();
 	const FVector C = GetActorLocation();
 
-	auto SpawnAt = [&](EFishType Type, const FVector& P, float Wander)
+	int32 NextSchool = 0;
+	auto SpawnAt = [&](EFishType Type, const FVector& P, float Wander, int32 School, ACatchableFish* Lead, const FVector& Offset) -> ACatchableFish*
 	{
 		const FTransform T(FRotator(0.f, R.FRandRange(0.f, 360.f), 0.f), P);
 		ACatchableFish* F = W->SpawnActorDeferred<ACatchableFish>(ACatchableFish::StaticClass(), T, this, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
@@ -23,8 +24,12 @@ void AFishSpawner::BeginPlay()
 		{
 			F->Type = Type;
 			F->WanderRadius = Wander;
+			F->SchoolId = School;
+			F->Leader = Lead;
+			F->SchoolOffset = Offset;
 			F->FinishSpawning(T);
 		}
+		return F;
 	};
 
 	auto SpawnOne = [&](EFishType Type, float MinDist, float MaxDist, float MinX, int32 Count)
@@ -42,10 +47,22 @@ void AFishSpawner::BeginPlay()
 				continue;
 			}
 			P.Z = Hit.ImpactPoint.Z + R.FRandRange(250.f, 650.f);
-			for (int32 i = 0; i < Count; ++i)
+			if (Count > 1)
 			{
-				const FVector Off = Count > 1 ? FVector(R.FRandRange(-250.f, 250.f), R.FRandRange(-250.f, 250.f), R.FRandRange(-80.f, 80.f)) : FVector::ZeroVector;
-				SpawnAt(Type, P + Off, Count > 1 ? 450.f : (Type == EFishType::Grouper ? 1200.f : 2000.f));
+				// a school: the first fish leads, the others hold a slot around the shared gathering point
+				const int32 School = NextSchool++;
+				ACatchableFish* Lead = nullptr;
+				for (int32 i = 0; i < Count; ++i)
+				{
+					const float A2 = 2.f * PI * i / Count;
+					const FVector Off(FMath::Cos(A2) * R.FRandRange(90.f, 190.f), FMath::Sin(A2) * R.FRandRange(90.f, 190.f), R.FRandRange(-70.f, 70.f));
+					ACatchableFish* F = SpawnAt(Type, P + Off, 1300.f, School, Lead, Off);
+					if (!Lead) Lead = F;
+				}
+			}
+			else
+			{
+				SpawnAt(Type, P, Type == EFishType::Grouper ? 520.f : 2000.f, -1, nullptr, FVector::ZeroVector);
 			}
 			return;
 		}

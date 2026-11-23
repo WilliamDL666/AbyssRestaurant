@@ -176,7 +176,7 @@ void ARestaurantWalker::Tick(float Dt)
 		const AAbyssGameMode* GM = AAbyssGameMode::Get(this);
 		if (GM && GM->GetDome() && GM->GetDome()->Counter.bOpen)
 		{
-			Work = GM->GetDome()->Counter.Pans[0].Busy() || GM->GetDome()->Counter.Pans[1].Busy() ? EChefWork::Stir : EChefWork::Chop;
+			Work = GM->GetDome()->Counter.Pans[0].Busy() || GM->GetDome()->Counter.Pot.Busy() ? EChefWork::Stir : EChefWork::Chop;
 		}
 		else if (IsCookingNow(this) && GM && GM->GetDome())
 		{
@@ -195,11 +195,11 @@ void ARestaurantWalker::Tick(float Dt)
 			if (Want != ShownCarry)
 			{
 				ShownCarry = Want;
-				static const TCHAR* DishMeshes[] = { TEXT("SM_Dish_Nigiri"), TEXT("SM_Dish_Tuna"), TEXT("SM_Dish_Grouper"), TEXT("SM_Dish_Kelp") };
+				static const TCHAR* DishMeshes[] = { TEXT("SM_Dish_Nigiri"), TEXT("SM_Dish_Tuna"), TEXT("SM_Dish_Grouper"), TEXT("SM_Dish_Kelp"), TEXT("SM_Dish_Stew") };
 				UStaticMesh* M = nullptr;
 				if (Want >= 0)
 				{
-					const TCHAR* N = DishMeshes[FMath::Clamp(Want, 0, 3)];
+					const TCHAR* N = DishMeshes[FMath::Clamp(Want, 0, 4)];
 					M = LoadObject<UStaticMesh>(nullptr, *FString::Printf(TEXT("/Game/Abyss/Food/%s.%s"), N, N), nullptr, LOAD_NoWarn | LOAD_Quiet);
 				}
 				CarryMesh->SetStaticMesh(M);
