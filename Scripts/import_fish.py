@@ -43,12 +43,17 @@ for f in sorted(glob.glob(os.path.join(ROOT, "SourceArt", "Fish", "SM_*.fbx"))):
     slots = [str(s.get_editor_property("material_slot_name")) for s in m.get_editor_property("static_materials")] if m else []
     unreal.log("[AbyssSetup] fish %s slots=%s origin=%s extent=%s" % (name, slots, m.get_bounds().origin if m else None, m.get_bounds().box_extent if m else None))
 
+for f in sorted(glob.glob(os.path.join(ROOT, "SourceArt", "Aquarium", "SM_*.fbx"))):
+    name = os.path.splitext(os.path.basename(f))[0]
+    m = run(f, "/Game/Abyss/Aquarium", name, mesh_opts(False))
+    unreal.log("[AbyssSetup] aquarium %s slots=%s" % (name, [str(s.get_editor_property("material_slot_name")) for s in m.get_editor_property("static_materials")] if m else None))
+
 f = os.path.join(ROOT, "SourceArt", "Food", "models", "SM_Dish_Stew.fbx")
 m = run(f, "/Game/Abyss/Food", "SM_Dish_Stew", mesh_opts(True))
 unreal.log("[AbyssSetup] food SM_Dish_Stew ok=%s" % (m is not None))
 
 UI = os.path.join(ROOT, "SourceArt", "Food", "ui")
-for base in ["UI_Pot", "UI_Dish_4", "UI_Ing_8", "UI_Bait"] + ["UI_Sea_%d" % i for i in range(1, 8)]:
+for base in ["UI_Pot", "UI_Dish_4", "UI_Ing_8", "UI_Bait", "UI_Fish_0", "UI_Fish_1", "UI_Fish_2"] + ["UI_Sea_%d" % i for i in range(1, 8)]:
     tex = run(os.path.join(UI, base + ".png"), "/Game/Abyss/UI", "T_" + base[3:])
     if tex:
         tex.set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_EDITOR_ICON)

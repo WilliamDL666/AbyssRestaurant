@@ -47,6 +47,7 @@ struct FCPan
 	float Done = 0.f;     // 0 raw .. 0.86 perfect .. 1 burnt
 	bool bFlipped = false;
 	float FlipScore = 0.f;
+	float FlipT = 1.f;    // seconds since the flip (drives the toss animation)
 	float Sear = 0.f;     // crust from high heat early on (0..1)
 	float Scorch = 0.f;   // seconds of high heat after it should have come down
 	bool Busy() const { return Item.IsValid(); }
@@ -71,6 +72,7 @@ struct FCPlateItem
 {
 	FCItem Item;
 	FVector2D Off;        // position on the plate, -1..1
+	float Age = 0.f;      // seconds on the plate (pop-in)
 };
 
 // Screen layout (pixels) shared by the HUD (drawing) and the controller (hit tests).
@@ -156,6 +158,23 @@ struct ABYSSRESTAURANT_API FKitchenCounter
 	float Time = 0.f;
 	// side panels
 	int32 SidePanel = -1;  // 0 menu, 1 decor, 2 tasks, 3 codex
+	const UObject* Ctx = nullptr;   // world context for sounds (the dome)
+
+	// --- feel: press / pop / fly-back animations and little bursts of particles (drawn by the HUD)
+	struct FSpark { FVector2D P, V; float Life = 0.f, Max = 1.f, Size = 4.f; FLinearColor C = FLinearColor::White; };
+	TArray<FSpark> Sparks;
+	float TilePress[9] = {};      // 1 right after a tile was pressed, decays
+	float KnobTurn[2] = {};       // 1 right after a knob was turned
+	float PlatePop = 0.f;         // ring that expands when something lands on the plate
+	float BoardFlash = 0.f;       // flash along the last cut
+	float LastCutX = 0.f;
+	float PotSplash = 0.f;
+	bool bPlateReady = false;     // everything the ticket asks for is on the plate: the bell calls for attention
+	FCItem Fly;                   // an item dropped nowhere flies back to where it came from
+	FVector2D FlyFrom = FVector2D::ZeroVector, FlyTo = FVector2D::ZeroVector, DragOrigin = FVector2D::ZeroVector, PlateAt = FVector2D::ZeroVector;
+	float FlyT = 1.f;
+	FVector2D DragVel = FVector2D::ZeroVector, PrevMouse = FVector2D::ZeroVector;
+	void Emit(const FVector2D& At, int32 Num, const FLinearColor& C, float Speed = 220.f, float Size = 4.f, float Up = 0.5f);
 
 	bool DragFromPanActive() const { return DragFromPan >= 0; }
 	void Reset();

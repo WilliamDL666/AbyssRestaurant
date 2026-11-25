@@ -6,6 +6,8 @@
 #include "RestaurantDome.h"
 #include "RestaurantWalker.h"
 #include "CatchableFish.h"
+#include "AquariumTank.h"
+#include "AbyssSfx.h"
 #include "EngineUtils.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
@@ -48,7 +50,8 @@ void AAbyssGameMode::StartPlay()
 	UE_LOG(LogAbyss, Log, TEXT("StartPlay: ServiceDome=%s DockDome=%s AutoTest=%d"),
 		ServiceDome.IsValid() ? *ServiceDome->GetName() : TEXT("none"), DockDome.IsValid() ? *DockDome->GetName() : TEXT("none"), bAutoTest ? 1 : 0);
 	Super::StartPlay();
-	ShowToast(TEXT("Day 1 - Find fish. Hover & press [E] to dive out with net/speargun. Dock with [E]."), FLinearColor(0.6f, 0.95f, 1.f), 7.f);
+	if (!bAutoTest) StartTutorial();
+	else ShowToast(TEXT("Day 1 - Find fish. Hover & press [E] to dive out with net/speargun. Dock with [E]."), FLinearColor(0.6f, 0.95f, 1.f), 7.f);
 }
 
 void AAbyssGameMode::Tick(float Dt)
@@ -57,6 +60,7 @@ void AAbyssGameMode::Tick(float Dt)
 	ToastTime = FMath::Max(0.f, ToastTime - Dt);
 	if (Phase == EAbyssPhase::Ending) EndingTime += Dt;
 	if (bAutoTest) TickAutoTest(Dt);
+	if (bTutorial) TickTutorial(Dt);
 	if (!bPlacedSub)
 	{
 		if (ASubmarinePawn* S = Cast<ASubmarinePawn>(UGameplayStatics::GetPlayerPawn(this, 0)))
@@ -82,11 +86,13 @@ int32 AAbyssGameMode::CargoCount() const
 	return N;
 }
 
-bool AAbyssGameMode::AddFish(EFishType Type, bool bPrime)
+bool AAbyssGameMode::AddFish(EFishType Type, bool bPrime, bool bAlive)
 {
 	if (CargoCount() >= CargoCapacity) return false;
 	Stock[(int32)Type]++;
 	if (bPrime) Prime[(int32)Type]++;
+	if (bAlive) Live[(int32)Type]++;
+	AbyssSfx::Play(this, bPrime ? TEXT("Sparkle") : TEXT("Bubble"));
 	if (Type == EFishType::Grouper) bGrouperFoundToday = true;
 	return true;
 }
@@ -98,7 +104,97 @@ bool AAbyssGameMode::TakeFish(int32 Fish, bool bWantPrime)
 	const bool bPrime = Prime[Fish] > 0 && (bWantPrime || Normal <= 0);
 	Stock[Fish]--;
 	if (bPrime) Prime[Fish]--;
+	Live[Fish] = FMath::Min(Live[Fish], Stock[Fish]);
 	return bPrime;
+}
+
+// ------------------------------------------------------------------ aquarium
+
+bool AAbyssGameMode::TankAdd(int32 Fish)
+{
+	if (Fish < 0 || Fish >= AbyssData::NumFish) return false;
+	if (Live[Fish] <= 0) { ShowToast(TEXT("Only fish caught alive (net or claw) can go on show"), FLinearColor(1.f, 0.6f, 0.3f), 2.2f); return false; }
+	if (Tank.Num() >= TankSlots) { ShowToast(TEXT("The display tank is full"), FLinearColor(1.f, 0.6f, 0.3f), 1.8f); return false; }
+	--Live[Fish];
+	FTankFish T;
+	T.Type = (EFishType)Fish;
+	// the ordinary ones go on show first; prime fish are worth more on a plate
+	T.bPrime = TakeFish(Fish, false);
+	Tank.Add(T);
+	AbyssSfx::Play(this, TEXT("Bubble"));
+	RefreshTank();
+	return true;
+}
+
+bool AAbyssGameMode::TankRemove(int32 Index)
+{
+	if (!Tank.IsValidIndex(Index)) return false;
+	const FTankFish T = Tank[Index];
+	Tank.RemoveAt(Index);
+	// back to the fridge, still alive
+	Stock[(int32)T.Type]++;
+	Live[(int32)T.Type]++;
+	if (T.bPrime) Prime[(int32)T.Type]++;
+	RefreshTank();
+	return true;
+}
+
+bool AAbyssGameMode::SellLive(int32 Fish)
+{
+	if (Fish < 0 || Fish >= AbyssData::NumFish) return false;
+	if (Live[Fish] <= 0) { ShowToast(TEXT("Only live fish can be sold to the market"), FLinearColor(1.f, 0.6f, 0.3f), 2.f); return false; }
+	--Live[Fish];
+	const bool bPrime = TakeFish(Fish, false);
+	const int32 P = AbyssData::LiveSalePrice((EFishType)Fish, bPrime);
+	Money += P;
+	AbyssSfx::Play(this, TEXT("Coin"));
+	ShowToast(FString::Printf(TEXT("Sold a live %s  +%d"), AbyssData::Fish((EFishType)Fish).Name, P), FLinearColor(1.f, 0.85f, 0.3f), 1.8f);
+	return true;
+}
+
+bool AAbyssGameMode::ExpandTank()
+{
+	if (TankSlots >= MaxTankSlots) return false;
+	const int32 Cost = ExpandCost();
+	if (Money < Cost) { ShowToast(TEXT("Not enough money"), FLinearColor(1.f, 0.4f, 0.3f), 1.5f); return false; }
+	Money -= Cost;
+	++TankSlots;
+	return true;
+}
+
+int32 AAbyssGameMode::TankTicketsPerNight() const
+{
+	int32 N = 0;
+	for (const FTankFish& T : Tank) N += AbyssData::TankTicket(T.Type, T.bPrime);
+	return N;
+}
+
+int32 AAbyssGameMode::TankUpkeepPerNight() const
+{
+	int32 N = 0;
+	for (const FTankFish& T : Tank) N += AbyssData::TankUpkeep(T.Type);
+	return N;
+}
+
+int32 AAbyssGameMode::TankExtraGuests() const
+{
+	// every different species on show draws one more guest
+	bool Seen[AbyssData::NumFish] = {};
+	int32 N = 0;
+	for (const FTankFish& T : Tank) if (!Seen[(int32)T.Type]) { Seen[(int32)T.Type] = true; ++N; }
+	return N;
+}
+
+void AAbyssGameMode::RefreshTank()
+{
+	ARestaurantDome* Dome = ServiceDome.Get();
+	if (!TankActor.IsValid() && Dome && Dome->bLuxLayout)
+	{
+		FActorSpawnParameters P;
+		P.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		TankActor = GetWorld()->SpawnActor<AAquariumTank>(AAquariumTank::StaticClass(), Dome->GetActorLocation(), Dome->GetActorRotation(), P);
+	}
+	if (TankActor.IsValid()) TankActor->SetFish(Tank);
 }
 
 // ------------------------------------------------------------------ pantry + tonight's menu
@@ -140,6 +236,7 @@ bool AAbyssGameMode::BuySeason(int32 Id)
 	Money -= D.Cost;
 	Pantry[Id][D.Shelf > 0 ? FMath::Clamp(D.Shelf, 1, AbyssData::MaxShelf) - 1 : 0]++;
 	BoughtNow[Id]++;
+	AbyssSfx::Play(this, TEXT("Coin"), 0.6f);
 	return true;
 }
 
@@ -219,6 +316,7 @@ bool AAbyssGameMode::DropBait(const FVector& At)
 	FActorSpawnParameters P;
 	P.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	ActiveBait = GetWorld()->SpawnActor<AAbyssBait>(AAbyssBait::StaticClass(), At, FRotator::ZeroRotator, P);
+	AbyssSfx::Play(this, TEXT("Plop"));
 	--Bait;
 	ShowToast(FString::Printf(TEXT("Bait dropped (%d left) - lights off and wait for the grouper"), Bait), FLinearColor(1.f, 0.75f, 0.45f), 3.f);
 	return true;
@@ -405,6 +503,7 @@ void AAbyssGameMode::ReturnDiverToSub(bool bEmergency)
 			const int32 Take = FMath::Min(L, Stock[i]);
 			Stock[i] -= Take;
 			Prime[i] = FMath::Min(Prime[i], Stock[i]);
+			Live[i] = FMath::Min(Live[i], Stock[i]);
 			Lost += Take;
 		}
 		ShowToast(FString::Printf(TEXT("Out of oxygen! Emergency recall to the sub - lost %d fish"), Lost), FLinearColor(1.f, 0.45f, 0.3f), 4.f);
@@ -495,6 +594,7 @@ void AAbyssGameMode::EnterRestaurant(bool bEmergency)
 			Dome->SetInteriorActive(true);
 			Dome->ApplyTier(RestaurantTier);
 			Dome->MaxConcurrentOrders = 2 + RestaurantTier;
+			RefreshTank();
 		}
 		if (Wk && Dome)
 		{
@@ -521,6 +621,10 @@ void AAbyssGameMode::OpenRestaurant()
 	Phase = EAbyssPhase::Restaurant;
 	for (int32& B : BoughtNow) B = 0;
 	BaitBoughtNow = 0;
+	// the display tank draws a few more guests
+	NightCustomers += TankExtraGuests();
+	PrepTab = 0;
+	AbyssSfx::Play(this, TEXT("Bell"));
 	if (ARestaurantDome* Dome = ServiceDome.Get()) Dome->BeginNight(NightCustomers);
 	ShowToast(TEXT("Welcome in! Walk around freely (WASD). Cook at the kitchen counter."), FLinearColor(1.f, 0.85f, 0.4f), 5.f);
 }
@@ -529,10 +633,27 @@ void AAbyssGameMode::OnNightFinished()
 {
 	if (Phase != EAbyssPhase::Restaurant) return;
 	Phase = EAbyssPhase::Summary;
+	// the aquarium's night: ticket money in, upkeep out, and every species on show gets a night of study
+	NightTickets = TankTicketsPerNight();
+	NightUpkeep = TankUpkeepPerNight();
+	Money += NightTickets - NightUpkeep;
+	bool Seen[AbyssData::NumFish] = {};
+	for (const FTankFish& T : Tank)
+	{
+		if (Seen[(int32)T.Type]) continue;
+		Seen[(int32)T.Type] = true;
+		Studied[(int32)T.Type]++;
+	}
 }
 
 void AAbyssGameMode::ConfirmPressed()
 {
+	// the tutorial's welcome and goodbye cards are dismissed with Enter
+	if (bTutorial && (TutStep == 0 || TutStep == TutorialSteps - 1))
+	{
+		if (TutStep == 0) TutNext(); else bTutorial = false;
+		return;
+	}
 	if (Phase == EAbyssPhase::Prep) { OpenRestaurant(); return; }
 	if (Phase == EAbyssPhase::Summary && Day >= DemoDays && !bEndingShown)
 	{
@@ -602,6 +723,8 @@ void AAbyssGameMode::DebugJumpToRestaurant()
 	Prime[0] = FMath::Max(Prime[0], 2);
 	Prime[1] = FMath::Max(Prime[1], 1);
 	Prime[2] = FMath::Max(Prime[2], 1);
+	Live[0] = FMath::Max(Live[0], 3);
+	Live[1] = FMath::Max(Live[1], 2);
 	UE_LOG(LogAbyss, Log, TEXT("DebugJumpToRestaurant"));
 	EnterRestaurant(false);
 }
@@ -683,6 +806,26 @@ void AAbyssGameMode::TickAutoTest(float Dt)
 		bAutoTestAerialShot = true;
 		Shot(TEXT("06b_aerial.png"));
 	}
+	// straight-down plan view of the dining room (no HUD): the base picture for layout work
+	{
+		static bool bTopPosed = false, bTopShot = false, bTopDone = false;
+		APlayerController* PCT = UGameplayStatics::GetPlayerController(this, 0);
+		if (AutoTestStep == 16 && AutoTestTime >= 45.9f && !bTopPosed && ServiceDome.IsValid() && PCT)
+		{
+			bTopPosed = true;
+			const FVector C = ServiceDome->GetActorLocation();
+			// +Y of the room (the entrance side) is up in the picture, the kitchen is at the bottom
+			if (ACameraActor* Cam = GetWorld()->SpawnActor<ACameraActor>(C + FVector(0.f, 0.f, 2050.f), FRotator(-90.f, 90.f, 0.f)))
+			{
+				Cam->GetCameraComponent()->SetFieldOfView(120.f);
+				Cam->GetCameraComponent()->SetConstraintAspectRatio(false);
+				PCT->SetViewTarget(Cam);
+			}
+			if (AHUD* Hd = PCT->GetHUD()) Hd->bShowHUD = false;
+		}
+		if (AutoTestStep >= 16 && AutoTestTime >= 46.3f && bTopPosed && !bTopShot) { bTopShot = true; Shot(TEXT("06e_topdown.png")); }
+		if (AutoTestTime >= 46.5f && bTopShot && !bTopDone && PCT) { bTopDone = true; if (AHUD* Hd = PCT->GetHUD()) Hd->bShowHUD = true; }
+	}
 	if (AutoTestStep == 8 && AutoTestTime >= 33.1f && !bAutoTestBookPosed)
 	{
 		bAutoTestBookPosed = true;
@@ -702,6 +845,12 @@ void AAbyssGameMode::TickAutoTest(float Dt)
 		{
 			if (AAbyssHUD* Hd = PC->GetHUD<AAbyssHUD>()) Hd->bRecipeBook = false;
 		}
+	}
+	{
+		static bool bTutOn = false, bTutShot = false, bTutOff = false;
+		if (AutoTestStep == 5 && AutoTestTime >= 24.4f && !bTutOn) { bTutOn = true; bTutorial = true; TutStep = 4; }
+		if (AutoTestStep == 5 && AutoTestTime >= 24.8f && !bTutShot) { bTutShot = true; Shot(TEXT("01f_tutorial.png")); }
+		if (AutoTestStep >= 6 && !bTutOff) { bTutOff = true; bTutorial = false; }
 	}
 	// close-ups of the three fish (and the grouper's den) between the diver shots and the explore shot
 	{
@@ -753,7 +902,12 @@ void AAbyssGameMode::TickAutoTest(float Dt)
 		bAutoTestPrepShot = true;
 		Shot(TEXT("02p_prep.png"));
 	}
-	if (AutoTestStep == 7 && AutoTestTime >= 29.2f && Phase == EAbyssPhase::Prep) OpenRestaurant();
+	{
+		static bool bAquaTab = false, bAquaShot = false;
+		if (AutoTestStep == 7 && AutoTestTime >= 29.4f && !bAquaTab && Phase == EAbyssPhase::Prep) { bAquaTab = true; PrepTab = 1; }
+		if (AutoTestStep == 7 && AutoTestTime >= 30.f && !bAquaShot && Phase == EAbyssPhase::Prep) { bAquaShot = true; Shot(TEXT("02q_aquarium.png")); }
+	}
+	if (AutoTestStep == 7 && AutoTestTime >= 30.6f && Phase == EAbyssPhase::Prep) OpenRestaurant();
 	// summary screen shot, then the ending
 	if (AutoTestStep == 17 && AutoTestTime >= 46.6f && !bAutoTestSummaryShot)
 	{
@@ -778,7 +932,7 @@ void AAbyssGameMode::TickAutoTest(float Dt)
 		{
 			if (APawn* P = UGameplayStatics::GetPlayerPawn(this, 0))
 			{
-				P->SetActorLocationAndRotation(D->GetActorLocation() + FVector(200.f, 150.f, 100.f), FRotator(0.f, 0.f, 0.f), false, nullptr, ETeleportType::TeleportPhysics);
+				P->SetActorLocationAndRotation(D->GetActorLocation() + FVector(430.f, 150.f, 100.f), FRotator(0.f, 0.f, 0.f), false, nullptr, ETeleportType::TeleportPhysics);
 				if (AController* C = P->GetController()) C->SetControlRotation(FRotator(-10.f, 180.f, 0.f));
 			}
 		}
@@ -872,6 +1026,8 @@ void AAbyssGameMode::TickAutoTest(float Dt)
 		MenuMain[2] = (int32)ESeason::Saffron; MenuSide[2] = (int32)ESeason::Urchin;
 		MenuMain[4] = (int32)ESeason::Soy;
 		PrepMouse = FVector2D(900.f, 300.f);
+		TankAdd(0); TankAdd(0); TankAdd(1);
+		Studied[0] = 2;
 		break;
 	case 7: LogState(TEXT("inside")); Shot(TEXT("02_restaurant.png")); break;
 	case 8:

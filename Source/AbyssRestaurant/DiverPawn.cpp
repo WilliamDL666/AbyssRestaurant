@@ -1,6 +1,7 @@
 #include "DiverPawn.h"
 #include "AbyssAssets.h"
 #include "AbyssGameMode.h"
+#include "AbyssSfx.h"
 #include "SubmarinePawn.h"
 #include "CatchableFish.h"
 #include "Components/SphereComponent.h"
@@ -447,7 +448,7 @@ bool ADiverPawn::LandFish(ACatchableFish* F, ECatchMethod Method, bool bPrime)
 {
 	AAbyssGameMode* GM = AAbyssGameMode::Get(this);
 	if (!GM) return false;
-	if (GM->AddFish(F->Type, bPrime))
+	if (GM->AddFish(F->Type, bPrime, Method != ECatchMethod::Harpoon))
 	{
 		DiveCatch[(int32)F->Type]++;
 		F->OnCaught();
@@ -473,6 +474,7 @@ void ADiverPawn::Fire()
 	{
 		Cooldown = HarpoonCooldown;
 		ShootKick = 1.f;
+		AbyssSfx::Play(this, TEXT("Thunk"));
 		const FVector Muzzle = HarpoonRoot->GetComponentLocation() + GetActorForwardVector() * 100.f;
 		ACatchableFish* F = FindFishOnAim(HarpoonRange);
 		FVector AimPoint = Camera->GetComponentLocation() + Camera->GetForwardVector() * (HarpoonRange + SpringArm->TargetArmLength);
@@ -523,6 +525,7 @@ void ADiverPawn::Fire()
 	{
 		Cooldown = 1.1f;
 		SwingTime = 0.f;
+		AbyssSfx::Play(this, TEXT("Whoosh"));
 		bSwingResolved = false;
 	}
 }
@@ -638,7 +641,7 @@ void ADiverPawn::Tick(float Dt)
 	if (GM && GM->Phase == EAbyssPhase::Explore)
 	{
 		const float Drain = (bBoost ? 1.5f : 1.f) * (bTooDeep ? 2.f : 1.f);
-		Oxygen01 = FMath::Max(0.f, Oxygen01 - Dt * Drain / OxygenSeconds());
+		if (!GM->IsTutorial()) Oxygen01 = FMath::Max(0.f, Oxygen01 - Dt * Drain / OxygenSeconds());
 		if (Oxygen01 <= 0.f)
 		{
 			GM->ReturnDiverToSub(true);

@@ -3,6 +3,7 @@
 #include "RestaurantCustomer.h"
 #include "AbyssGameMode.h"
 #include "AbyssTypes.h"
+#include "AbyssSfx.h"
 
 namespace
 {
@@ -201,6 +202,22 @@ void FKitchenCounter::Reset()
 	SidePanel = -1;
 }
 
+void FKitchenCounter::Emit(const FVector2D& At, int32 Num, const FLinearColor& C, float Speed, float Size, float Up)
+{
+	if (Sparks.Num() > 160) return;
+	for (int32 i = 0; i < Num; ++i)
+	{
+		FSpark S;
+		const float A = FMath::FRandRange(0.f, 2.f * PI);
+		S.P = At;
+		S.V = FVector2D(FMath::Cos(A), FMath::Sin(A) - Up) * Speed * FMath::FRandRange(0.4f, 1.f);
+		S.Max = S.Life = FMath::FRandRange(0.35f, 0.7f);
+		S.Size = Size * FMath::FRandRange(0.6f, 1.2f);
+		S.C = C;
+		Sparks.Add(S);
+	}
+}
+
 void FKitchenCounter::Say(const FString& S, const FLinearColor& C, const FVector2D& At)
 {
 	Feedback = S;
@@ -219,9 +236,43 @@ ECItem FKitchenCounter::PotNext() const
 
 void FKitchenCounter::Tick(float Dt, ARestaurantDome* Dome)
 {
+	Ctx = Dome;
 	Time += Dt;
 	FeedbackTime = FMath::Max(0.f, FeedbackTime - Dt);
 	BellRing = FMath::Max(0.f, BellRing - Dt);
+	// feel layer
+	for (float& T : TilePress) T = FMath::Max(0.f, T - Dt * 7.f);
+	for (float& T : KnobTurn) T = FMath::Max(0.f, T - Dt * 4.f);
+	PlatePop = FMath::Max(0.f, PlatePop - Dt * 3.5f);
+	BoardFlash = FMath::Max(0.f, BoardFlash - Dt * 4.f);
+	PotSplash = FMath::Max(0.f, PotSplash - Dt * 3.f);
+	FlyT += Dt * 5.f;
+	for (FCPlateItem& Pi : Plate) Pi.Age += Dt;
+	for (FCPan& Pn : Pans) Pn.FlipT += Dt;
+	DragVel = FMath::Vector2DInterpTo(DragVel, Dt > 0.f ? (Mouse - PrevMouse) / Dt : FVector2D::ZeroVector, Dt, 12.f);
+	PrevMouse = Mouse;
+	for (int32 i = Sparks.Num() - 1; i >= 0; --i)
+	{
+		FSpark& S = Sparks[i];
+		S.Life -= Dt;
+		if (S.Life <= 0.f) { Sparks.RemoveAtSwap(i); continue; }
+		S.V.Y += 520.f * Dt;
+		S.V *= FMath::Max(0.f, 1.f - 1.6f * Dt);
+		S.P += S.V * Dt;
+	}
+	// is the plate complete for the selected ticket?
+	bPlateReady = false;
+	if (const ARestaurantCustomer* AC = Active.Get())
+	{
+		TArray<EIngredient> Need = AbyssRecipes::Get(AC->Dish).Slots;
+		int32 Extra = 0;
+		for (const FCPlateItem& Pi : Plate)
+		{
+			const int32 Idx = Need.Find(Pi.Item.AsIngredient());
+			if (Idx != INDEX_NONE) Need.RemoveAt(Idx); else ++Extra;
+		}
+		bPlateReady = Plate.Num() > 0 && Need.Num() == 0 && Extra == 0;
+	}
 	AAbyssGameMode* GM = Dome ? AAbyssGameMode::Get(Dome) : nullptr;
 	// the pan keeps cooking whether the counter is open or not; the knob sets how fast
 	for (int32 i = 0; i < NumPans; ++i)
@@ -290,6 +341,7 @@ void FKitchenCounter::Cut(float X01, float Slant)
 	const float Score = Best == INDEX_NONE ? 30.f : FMath::Clamp(100.f - BestD * CutTight - Slant * 260.f, 15.f, 100.f);
 	Cuts.Add(X01);
 	CutScores.Add(Score);
+	AbyssSfx::Play(Ctx, TEXT("Chop"), 0.9f, FMath::FRandRange(0.92f, 1.08f));
 	if (Cuts.Num() >= NumCuts)
 	{
 		float Avg = 0.f;
@@ -321,6 +373,9 @@ bool FKitchenCounter::PlaceOnPlate(const FCItem& I, const FVector2D& P, const FC
 	const FVector2D D = P - L.Plate;
 	Pit.Off = FVector2D(FMath::Clamp(D.X / L.PlateR, -0.75f, 0.75f), FMath::Clamp(D.Y / (L.PlateR * PlateSquash), -0.7f, 0.7f));
 	Plate.Add(Pit);
+	PlatePop = 1.f;
+	Emit(P, 7, FLinearColor(1.f, 0.88f, 0.5f), 150.f, 3.f, 0.8f);
+	AbyssSfx::Play(Ctx, TEXT("Pop"), 0.7f, FMath::FRandRange(0.9f, 1.15f));
 	return true;
 }
 
@@ -363,6 +418,9 @@ bool FKitchenCounter::AddToPot(const FCItem& I, const FVector2D& P)
 	}
 	if (!Pot.Busy()) { Pot.T = 0.f; Pot.Boil = 0.f; }
 	Pot.Added.Add(I.Kind);
+	PotSplash = 1.f;
+	Emit(P, 12, FLinearColor(0.75f, 0.9f, 1.f), 210.f, 4.f, 1.5f);
+	AbyssSfx::Play(Ctx, I.Kind != Want ? TEXT("Error") : TEXT("Plop"));
 	Pot.Scores.Add(Score);
 	if (I.Kind == ECItem::Sashimi) Pot.Fish = I;
 	Say(Msg, Col, P);
@@ -408,6 +466,9 @@ FCItem FKitchenCounter::TakeFromPan(int32 Pi, const FVector2D& P)
 void FKitchenCounter::MouseDown(const FVector2D& P, const FCounterLayout& L, ARestaurantDome* Dome)
 {
 	Mouse = DownAt = P;
+	Ctx = Dome;
+	DragOrigin = P;
+	PlateAt = L.Plate;
 	AAbyssGameMode* GM = AAbyssGameMode::Get(Dome);
 	if (!GM) return;
 
@@ -442,6 +503,9 @@ void FKitchenCounter::MouseDown(const FVector2D& P, const FCounterLayout& L, ARe
 	if (Knob != INDEX_NONE)
 	{
 		Heat[Knob] = (Heat[Knob] + 1) % 3;
+		KnobTurn[Knob] = 1.f;
+		Emit(L.Knob[Knob] - FVector2D(0.f, L.KnobR + 16.f * L.U), 5, Heat[Knob] == 0 ? FLinearColor(0.4f, 0.75f, 1.f) : Heat[Knob] == 1 ? FLinearColor(1.f, 0.78f, 0.25f) : FLinearColor(1.f, 0.4f, 0.15f), 120.f, 3.f, 1.2f);
+		AbyssSfx::Play(Ctx, TEXT("Click"), 1.f, 0.8f + 0.2f * Heat[Knob]);
 		Say(Heat[Knob] == 0 ? TEXT("Heat: LOW") : Heat[Knob] == 1 ? TEXT("Heat: MEDIUM") : TEXT("Heat: HIGH"),
 			Heat[Knob] == 0 ? FLinearColor(0.5f, 0.8f, 1.f) : Heat[Knob] == 1 ? FLinearColor(1.f, 0.85f, 0.4f) : FLinearColor(1.f, 0.45f, 0.25f), L.Knob[Knob]);
 		return;
@@ -508,10 +572,18 @@ void FKitchenCounter::MouseDown(const FVector2D& P, const FCounterLayout& L, ARe
 			I.bPrime = (bTop && Pr > 0) || No <= 0;
 		}
 		Drag = I;
+		TilePress[Slot] = 1.f;
+		DragOrigin = L.SlotPos[Slot] + FVector2D(L.SlotSize * 0.5f, L.SlotSize * 0.45f);
+		AbyssSfx::Play(Ctx, TEXT("Pop"), 0.35f, 1.4f);
 		return;
 	}
 	const int32 Bin = L.BinAt(P);
-	if (Bin != INDEX_NONE) Drag = BinItem(Bin);
+	if (Bin != INDEX_NONE)
+	{
+		Drag = BinItem(Bin);
+		DragOrigin = L.Bins[Bin];
+		AbyssSfx::Play(Ctx, TEXT("Pop"), 0.35f, 1.4f);
+	}
 }
 
 void FKitchenCounter::MouseUp(const FVector2D& P, const FCounterLayout& L, ARestaurantDome* Dome)
@@ -533,6 +605,9 @@ void FKitchenCounter::MouseUp(const FVector2D& P, const FCounterLayout& L, ARest
 				const float X01 = FMath::Clamp((0.5f * (P.X + CutStart.X) - L.Board.Min.X) / BW, 0.f, 1.f);
 				const int32 Before = CutScores.Num();
 				Cut(X01, FMath::Abs(P.X - CutStart.X) / BW);
+				BoardFlash = 1.f;
+				LastCutX = X01;
+				Emit(FVector2D(0.5f * (P.X + CutStart.X), 0.5f * (P.Y + CutStart.Y)), 9, FLinearColor(1.f, 0.9f, 0.8f), 190.f, 3.5f, 0.9f);
 				if (Board.Kind != ECItem::Fillet)
 				{
 					Say(Board.Prep >= 90.f ? TEXT("Beautiful knife work!") : Board.Prep >= 70.f ? TEXT("Decent cuts") : TEXT("Rough cuts..."),
@@ -560,6 +635,9 @@ void FKitchenCounter::MouseUp(const FVector2D& P, const FCounterLayout& L, ARest
 			if (!Pan.bFlipped)
 			{
 				Pan.bFlipped = true;
+				Pan.FlipT = 0.f;
+				Emit(L.Pan[Pi], 8, FLinearColor(1.f, 0.75f, 0.35f), 200.f, 3.5f, 1.3f);
+				AbyssSfx::Play(Ctx, TEXT("Flip"));
 				Pan.FlipScore = FMath::Clamp(100.f - FMath::Abs(Pan.Done - 0.45f) * 380.f, 10.f, 100.f);
 				Say(Pan.FlipScore >= 85.f ? TEXT("Nice flip!") : Pan.Done < 0.45f ? TEXT("Flipped a bit early") : TEXT("Flipped a bit late"),
 					Pan.FlipScore >= 85.f ? FLinearColor(0.4f, 1.f, 0.5f) : FLinearColor(1.f, 0.8f, 0.3f), L.Pan[Pi]);
@@ -617,6 +695,8 @@ void FKitchenCounter::MouseUp(const FVector2D& P, const FCounterLayout& L, ARest
 					Pans[i] = FCPan();
 					Pans[i].Item = I;
 					bUsed = bAll = true;
+					Emit(L.Pan[i], 12, FLinearColor(1.f, 0.9f, 0.7f), 170.f, 3.f, 1.4f);
+					AbyssSfx::Play(Ctx, TEXT("Sizzle"), 0.8f);
 				}
 			}
 			if (!bUsed && L.InPot(P)) Say(TEXT("Steaks go in the frying pan"), FLinearColor(1.f, 0.6f, 0.3f), P);
@@ -637,7 +717,7 @@ void FKitchenCounter::MouseUp(const FVector2D& P, const FCounterLayout& L, ARest
 	{
 		if (L.InBoard(P))
 		{
-			if (Board.IsValid()) { Say(TEXT("The board is busy"), FLinearColor(1.f, 0.6f, 0.3f), P); return; }
+			if (Board.IsValid()) { Say(TEXT("The board is busy"), FLinearColor(1.f, 0.6f, 0.3f), P); Fly = I; FlyFrom = P; FlyTo = DragOrigin; FlyT = 0.f; return; }
 			Board = I;
 			if (GM) Board.bPrime = GM->TakeFish(I.Fish, I.bPrime);   // a fillet comes out of the fridge
 			// how it should be cut depends on what it is for
@@ -645,12 +725,21 @@ void FKitchenCounter::MouseUp(const FVector2D& P, const FCounterLayout& L, ARest
 			if (R && R->Fish == I.Fish) SetCuts(R->Cuts, R->CutTight);
 			else SetCuts(I.Fish == 0 ? 5 : 2, I.Fish == 0 ? 1500.f : 600.f);
 			Say(NumCuts >= 4 ? TEXT("Thin, even slices: drag the knife down each gold line") : TEXT("Drag the knife down the gold lines"), FLinearColor(1.f, 0.9f, 0.6f), P);
+			Emit(P, 6, FLinearColor(1.f, 0.95f, 0.85f), 120.f, 3.f, 0.6f);
+			AbyssSfx::Play(Ctx, TEXT("Plop"), 0.5f, 1.3f);
 		}
+		else if (!bClick) { Fly = I; FlyFrom = P; FlyTo = DragOrigin; FlyT = 0.f; }
 		return;
 	}
-	if (L.InPot(P)) AddToPot(I, P);
-	else if (L.InPlate(P)) PlaceOnPlate(I, P, L);
-	else if (I.Kind == ECItem::Steak) { for (int32 i = 0; i < NumPans; ++i) if (L.InPan(i, P) && !Pans[i].Busy()) { Pans[i].Item = I; break; } }
+	bool bLanded = true;
+	if (L.InPot(P)) bLanded = AddToPot(I, P);
+	else if (L.InPlate(P)) bLanded = PlaceOnPlate(I, P, L);
+	else if (I.Kind == ECItem::Steak) { bLanded = false; for (int32 i = 0; i < NumPans; ++i) if (L.InPan(i, P) && !Pans[i].Busy()) { Pans[i].Item = I; bLanded = true; break; } }
+	else bLanded = false;
+	if (!bLanded && !bClick)
+	{
+		Fly = I; FlyFrom = P; FlyTo = DragOrigin; FlyT = 0.f;
+	}
 }
 
 float FKitchenCounter::ScorePlate(const FRecipe& R, int32 Dish, bool& bOutPrime) const
@@ -693,6 +782,8 @@ void FKitchenCounter::Serve(ARestaurantDome* Dome)
 	bool bPrime = false;
 	const float Score = ScorePlate(R, C->Dish, bPrime);
 	BellRing = 0.6f;
+	Emit(PlateAt, 26, FLinearColor(1.f, 0.85f, 0.35f), 380.f, 5.f, 1.6f);
+	AbyssSfx::Play(Dome, TEXT("Bell"));
 	Plate.Reset();
 	Dome->CompleteDish(C, Score, false, bPrime);
 	bOpen = false;   // the chef carries the plate to the table; the pan and the pot keep going

@@ -145,6 +145,16 @@ void AAbyssHUD::DrawHUD()
 		for (int32 i = 0; i < 9; ++i) UITex(FString::Printf(TEXT("Ing_%d"), i));
 		for (int32 i = 0; i < 5; ++i) UITex(FString::Printf(TEXT("Dish_%d"), i));
 		for (int32 i = 1; i < AbyssData::NumSeason; ++i) UITex(FString::Printf(TEXT("Sea_%d"), i));
+		for (int32 i = 0; i < 3; ++i) UITex(FString::Printf(TEXT("Fish_%d"), i));
+		UITex(TEXT("S_Lock"));
+		{
+			static const TCHAR* Gpt[] = { TEXT("A_Panel"), TEXT("E_Panel"), TEXT("A_TankSlot"), TEXT("A_TankSlot_Locked"), TEXT("A_Btn_Gold"), TEXT("A_Btn_Teal"), TEXT("A_Btn_Red"),
+				TEXT("A_Tab_On"), TEXT("A_Tab_Off"), TEXT("B_Ticket"), TEXT("B_Upkeep"), TEXT("B_Guests"), TEXT("B_Research"), TEXT("B_Live"), TEXT("B_Expand"),
+				TEXT("B_Fish_Yellowtail"), TEXT("B_Fish_Tuna"), TEXT("B_Fish_Grouper"), TEXT("C_Bait"), TEXT("D_Card_Stew"), TEXT("D_Pot"), TEXT("D_Star_Prime"),
+				TEXT("D_Flame_Low"), TEXT("D_Flame_Med"), TEXT("D_Flame_High"), TEXT("D_Flame_Off"), TEXT("D_Taste_Salty"), TEXT("D_Taste_Rich"), TEXT("D_Taste_Spicy"), TEXT("D_Taste_Fresh") };
+			for (const TCHAR* N : Gpt) UITex(N);
+			for (int32 i = 1; i < AbyssData::NumSeason; ++i) UITex(FString::Printf(TEXT("C_Sea_%d"), i));
+		}
 		UITex(TEXT("Bait")); UITex(TEXT("Pot")); UITex(TEXT("S_ArrowL")); UITex(TEXT("S_ArrowR")); UITex(TEXT("S_Plus")); UITex(TEXT("S_Minus"));
 		for (int32 i = 0; i < 3; ++i) UITex(FString::Printf(TEXT("Fillet_%d"), i));
 	}
@@ -177,6 +187,8 @@ void AAbyssHUD::DrawHUD()
 	case EAbyssPhase::Summary:    DrawSummary(GM); break;
 	case EAbyssPhase::Ending:     DrawEnding(GM); break;
 	}
+	if (GM->IsTutorial()) DrawTutorial(GM);
+	else if (GM->Phase == EAbyssPhase::Explore && GM->Day == 1) Text(TEXT("[F1] Tutorial"), Canvas->ClipX - 24.f * S, Canvas->ClipY - 22.f * S, 13.f, FLinearColor(0.7f, 0.82f, 0.85f, 0.7f), false, true);
 	DrawToast(GM);
 }
 
@@ -359,8 +371,8 @@ void AAbyssHUD::DrawRestaurant(AAbyssGameMode* GM)
 			{
 				// what this guest fancies
 				const FLinearColor TC = AbyssData::TasteColor(C->Taste);
-				Panel(X + 78.f * S, RY + 53.f * S, 9.f * S, 9.f * S, TC * 0.75f);
-				Text(FString::Printf(TEXT("likes %s"), AbyssData::TasteName(C->Taste)), X + 92.f * S, RY + 49.f * S, 12.f, FLinearColor(0.35f, 0.22f, 0.1f));
+				(void)TC;
+				TasteIcon(C->Taste, X + PW - 122.f * S, RY + 46.f * S, 26.f * S);
 			}
 		}
 	}
@@ -426,7 +438,6 @@ void AAbyssHUD::DrawRestaurant(AAbyssGameMode* GM)
 	{
 		const float X = 14.f * S, Y = H - 84.f * S;
 		Tex(UITex(TEXT("H_Fridge")), X, Y, 600.f * S, 72.f * S);
-		Text(TEXT("FRIDGE"), X + 118.f * S, Y + 24.f * S, 18.f, FLinearColor(0.85f, 0.95f, 1.f));
 		for (int32 i = 0; i < AbyssData::NumFish; ++i)
 		{
 			const float IX = X + 190.f * S + i * 132.f * S;
@@ -553,18 +564,19 @@ void AAbyssHUD::DrawSummary(AAbyssGameMode* GM)
 		Tex(UITex(k < NStar ? TEXT("H_Star") : TEXT("H_StarOff")), SX, SY, SS, SS);
 	}
 
-	float RY = Y + PH * 0.27f + 84.f * S;
+	float RY = Y + PH * 0.27f + 76.f * S;
 	const float LX = X + PW * 0.28f, RX = X + PW * 0.72f;
 	auto Row = [&](const FString& L, const FString& V, const FLinearColor& C)
 	{
 		Text(L, LX, RY, 18.f, FLinearColor(0.82f, 0.9f, 1.f));
 		Text(V, RX, RY, 18.f, C, false, true);
-		RY += 23.f * S;
+		RY += 20.f * S;
 	};
 	Row(TEXT("Guests served"), FString::Printf(TEXT("%d / %d"), GM->NightServed, GM->NightCustomers), FLinearColor::White);
 	Row(TEXT("Perfect dishes"), FString::FromInt(GM->NightPerfect), Green);
 	Row(TEXT("Prime-catch dishes"), FString::FromInt(GM->NightPrimeServed), Gold);
 	Row(TEXT("Taste matches (double tip)"), FString::FromInt(GM->NightTasteHits), FLinearColor(0.6f, 1.f, 0.6f));
+	if (GM->Tank.Num() > 0) Row(TEXT("Aquarium (tickets - upkeep)"), FString::Printf(TEXT("%s$%d"), GM->NightTickets >= GM->NightUpkeep ? TEXT("+") : TEXT("-"), FMath::Abs(GM->NightTickets - GM->NightUpkeep)), Gold);
 	Row(TEXT("Guests who left angry"), FString::FromInt(GM->NightLeft), GM->NightLeft > 0 ? Red : FLinearColor::White);
 	Row(TEXT("Earned tonight"), FString::Printf(TEXT("$%d"), GM->NightEarned), Gold);
 	Row(TEXT("Satisfaction"), FString::Printf(TEXT("%d%%"), FMath::RoundToInt(GM->Satisfaction * 100.f)), FLinearColor::White);
@@ -756,7 +768,16 @@ void AAbyssHUD::DrawCargo(AAbyssGameMode* GM, float Y)
 
 void AAbyssHUD::Star(float CX, float CY, float Size, float Alpha)
 {
-	Tex(UITex(TEXT("H_Star")), CX - Size * 0.5f, CY - Size * 0.5f, Size, Size, FLinearColor(1.f, 1.f, 1.f, Alpha));
+	UTexture2D* T = UITex(TEXT("D_Star_Prime"));
+	Tex(T ? T : UITex(TEXT("H_Star")), CX - Size * 0.6f, CY - Size * 0.6f, Size * 1.2f, Size * 1.2f, FLinearColor(1.f, 1.f, 1.f, Alpha));
+}
+
+// round badge for a guest's taste (salty / rich / spicy / fresh)
+void AAbyssHUD::TasteIcon(ETaste T, float CX, float CY, float Size, float Alpha)
+{
+	static const TCHAR* N[] = { TEXT(""), TEXT("D_Taste_Salty"), TEXT("D_Taste_Rich"), TEXT("D_Taste_Spicy"), TEXT("D_Taste_Fresh") };
+	if (T == ETaste::None || T == ETaste::Count) return;
+	Tex(UITex(N[(int32)T]), CX - Size * 0.5f, CY - Size * 0.5f, Size, Size, FLinearColor(1.f, 1.f, 1.f, Alpha));
 }
 
 // World-space help for the three fish behaviours: the tuna's route ahead, groupers hiding in their dens, the bait
@@ -1484,9 +1505,14 @@ void AAbyssHUD::DrawCounter(AAbyssGameMode* GM, ARestaurantDome* Dome)
 		}
 		if (K.DragFromPan == i && FVector2D::Distance(M, K.DownAt) >= 8.f * U) continue;
 		const float SW = L.PanR * 1.2f;
-		DrawCounterItem(P.Item, C, SW, 1.f - Cooked);
-		const FLinearColor BT(FMath::Lerp(1.f, 0.25f, Burn), FMath::Lerp(1.f, 0.2f, Burn), FMath::Lerp(1.f, 0.18f, Burn), Cooked);
-		Tex(UITex(TEXT("Steak_Cooked")), C.X - SW * 0.5f, C.Y - SW * 0.25f, SW, SW * 0.5f, BT);
+		// tossed in the air for a third of a second after a flip
+		const float Ft = FMath::Clamp(P.FlipT / 0.32f, 0.f, 1.f);
+		const float Toss = FMath::Sin(Ft * PI) * 46.f * U;
+		const float Squash = Ft < 1.f ? FMath::Max(0.12f, FMath::Abs(FMath::Cos(Ft * PI))) : 1.f;
+		if (Ft >= 1.f) DrawCounterItem(P.Item, C, SW, 1.f - Cooked);
+		const FLinearColor BT(FMath::Lerp(1.f, 0.25f, Burn), FMath::Lerp(1.f, 0.2f, Burn), FMath::Lerp(1.f, 0.18f, Burn), Ft < 1.f ? 1.f : Cooked);
+		Tex(UITex(Ft < 1.f && Cooked < 0.5f ? TEXT("Steak_Raw") : TEXT("Steak_Cooked")), C.X - SW * 0.5f, C.Y - SW * 0.25f * Squash - Toss, SW, SW * 0.5f * Squash, BT);
+		if (L.InPan(i, M) && !K.Drag.IsValid()) Circle(C.X, C.Y, L.PanR * 0.85f, FLinearColor(1.f, 0.9f, 0.6f, 0.35f + 0.15f * FMath::Sin(Time * 7.f)), 2.5f, 36);
 		for (int32 s = 0; s < 6; ++s)
 		{
 			const float T = FMath::Frac(Time * 0.6f + s * 0.17f);
@@ -1537,7 +1563,7 @@ void AAbyssHUD::DrawCounter(AAbyssGameMode* GM, ARestaurantDome* Dome)
 		const FCPot& Po = K.Pot;
 		const FVector2D C = L.Pot;
 		const float PS = L.PotR * 2.75f;
-		Tex(UITex(TEXT("Pot")), C.X - PS * 0.5f, C.Y - PS * 0.56f, PS, PS);
+		Tex(UITex(TEXT("D_Pot")), C.X - PS * 0.5f, C.Y - PS * 0.5f, PS, PS);
 		const bool bDragLadle = K.bDragFromPot && FVector2D::Distance(M, K.DownAt) >= 8.f * U;
 		const FVector2D Mouth = C + FVector2D(0.f, -L.PotR * 0.3f);
 		if (Po.Busy())
@@ -1613,16 +1639,23 @@ void AAbyssHUD::DrawCounter(AAbyssGameMode* GM, ARestaurantDome* Dome)
 		const FVector2D KP = L.Knob[i];
 		const int32 Lv = K.Heat[i];
 		const bool bHover = L.KnobAt(M) == i;
+		{
+			// pointer: left = low, up = medium, right = high; it swings over when turned
+			const float Ang = FMath::DegreesToRadians(-90.f + (Lv - 1) * 55.f - K.KnobTurn[i] * 55.f);
+			const FVector2D Tip = KP + FVector2D(FMath::Cos(Ang), FMath::Sin(Ang)) * L.KnobR * 0.72f;
+			Line(KP.X, KP.Y, Tip.X, Tip.Y, FLinearColor(1.f, 0.95f, 0.8f), 4.f);
+			Disc(Tip.X, Tip.Y, 5.f * U, Lv == 0 ? FLinearColor(0.5f, 0.8f, 1.f) : Lv == 1 ? FLinearColor(1.f, 0.8f, 0.3f) : FLinearColor(1.f, 0.45f, 0.2f), 10);
+			if (K.KnobTurn[i] > 0.f) Circle(KP.X, KP.Y, L.KnobR * (1.f + 0.5f * (1.f - K.KnobTurn[i])), FLinearColor(1.f, 0.85f, 0.4f, K.KnobTurn[i]), 2.5f, 28);
+		}
 		if (bHover) Circle(KP.X, KP.Y, L.KnobR, FLinearColor(1.f, 0.85f, 0.4f, 0.8f), 2.5f, 28);
 		for (int32 f = 0; f < 3; ++f)
 		{
-			// three flames over the knob
-			const FVector2D FP = KP + FVector2D((f - 1) * 26.f * U, -L.KnobR - 10.f * U - (f == 1 ? 6.f * U : 0.f));
+			// three flames over the knob: low / medium / high, the ones above the setting are out
+			static const TCHAR* Fn[] = { TEXT("D_Flame_Low"), TEXT("D_Flame_Med"), TEXT("D_Flame_High") };
 			const bool bLit = f <= Lv;
-			const float Fl = bLit ? 1.f + 0.15f * FMath::Sin(Time * 14.f + f * 2.f + i) : 1.f;
-			const FLinearColor FC = !bLit ? FLinearColor(0.1f, 0.12f, 0.2f, 0.8f) : f == 0 ? FLinearColor(0.4f, 0.75f, 1.f) : f == 1 ? FLinearColor(1.f, 0.78f, 0.25f) : FLinearColor(1.f, 0.4f, 0.15f);
-			Disc(FP.X, FP.Y, 9.f * U * Fl, FC, 12);
-			if (bLit) Disc(FP.X, FP.Y - 7.f * U * Fl, 5.f * U * Fl, FC, 10);
+			const float Fl = (f == Lv ? 46.f : 36.f) * U * (bLit ? 1.f + 0.06f * FMath::Sin(Time * 12.f + f * 2.f + i) : 1.f);
+			const FVector2D FP = KP + FVector2D((f - 1) * 40.f * U, -L.KnobR - 16.f * U);
+			Tex(UITex(bLit ? Fn[f] : TEXT("D_Flame_Off")), FP.X - Fl * 0.5f, FP.Y - Fl * 0.5f, Fl, Fl, bLit ? FLinearColor::White : FLinearColor(1.f, 1.f, 1.f, 0.55f));
 		}
 		Panel(KP.X - 34.f * U, KP.Y + L.KnobR - 2.f * U, 68.f * U, 24.f * U, FLinearColor(0.02f, 0.04f, 0.1f, 0.85f));
 		Text(Lv == 0 ? TEXT("LOW") : Lv == 1 ? TEXT("MED") : TEXT("HIGH"), KP.X, KP.Y + L.KnobR, 17.f, Lv == 0 ? FLinearColor(0.6f, 0.85f, 1.f) : Lv == 1 ? Gold : FLinearColor(1.f, 0.5f, 0.25f), true);
@@ -1632,14 +1665,32 @@ void AAbyssHUD::DrawCounter(AAbyssGameMode* GM, ARestaurantDome* Dome)
 	{
 		const float PR = L.PlateR;
 		Tex(UITex(TEXT("Plate")), L.Plate.X - PR, L.Plate.Y - PR * 0.56f, PR * 2.f, PR * 1.12f);
-		if (K.Drag.IsValid()) Circle(L.Plate.X, L.Plate.Y, PR * 0.9f, FLinearColor(1.f, 0.85f, 0.4f, 0.35f + 0.2f * FMath::Sin(Time * 6.f)), 2.f, 40);
-		for (const FCPlateItem& Pi : K.Plate) DrawCounterItem(Pi.Item, L.Plate + FVector2D(Pi.Off.X * PR, Pi.Off.Y * PR * 0.56f), 66.f * U);
+		const bool bPlateDrop = K.Drag.IsValid() && K.Drag.AsIngredient() != EIngredient::Count;
+		if (bPlateDrop)
+		{
+			const float Hv = L.InPlate(M) ? 1.f : 0.f;
+			Circle(L.Plate.X, L.Plate.Y, PR * (0.9f + 0.05f * Hv), FLinearColor(0.5f + 0.5f * (1.f - Hv), 1.f, 0.5f, 0.45f + 0.25f * FMath::Sin(Time * 6.f) + 0.25f * Hv), 2.f + 2.f * Hv, 40);
+		}
+		if (K.PlatePop > 0.f) Circle(L.Plate.X, L.Plate.Y, PR * (0.5f + 0.6f * (1.f - K.PlatePop)), FLinearColor(1.f, 0.9f, 0.5f, 0.8f * K.PlatePop), 3.f, 40);
+		for (const FCPlateItem& Pi : K.Plate)
+		{
+			const float Pop = 1.f + 0.5f * FMath::Square(FMath::Max(0.f, 1.f - Pi.Age / 0.2f));
+			DrawCounterItem(Pi.Item, L.Plate + FVector2D(Pi.Off.X * PR, Pi.Off.Y * PR * 0.56f), 66.f * U * Pop);
+		}
 		if (K.Plate.Num() == 0) Text(TEXT("Plate"), L.Plate.X, L.Plate.Y - 10.f * U, 18.f, FLinearColor(0.45f, 0.45f, 0.5f, 0.8f), true);
 		const bool bHover = L.InBell(M);
 		if (bHover || K.BellRing > 0.f) Circle(L.Bell.X, L.Bell.Y, L.BellR * (1.f + 0.4f * K.BellRing), FLinearColor(1.f, 0.85f, 0.4f, 0.7f), 3.f, 32);
-		const float TW = 120.f * U, TH = 46.f * U;
-		Tex(UITex(TEXT("S_BtnOk")), L.Bell.X - TW * 0.5f, L.Bell.Y - L.BellR - TH - 6.f * U, TW, TH);
-		Text(K.BellRing > 0.f ? TEXT("DING!") : TEXT("Serve"), L.Bell.X, L.Bell.Y - L.BellR - TH + 4.f * U, 20.f, FLinearColor::White, true);
+		// the plate matches the ticket: the bell glows and the button bounces
+		const float Rdy = K.bPlateReady && K.BellRing <= 0.f ? 1.f : 0.f;
+		const float Bn = Rdy * FMath::Abs(FMath::Sin(Time * 5.f)) * 8.f * U;
+		if (Rdy > 0.f)
+		{
+			Disc(L.Bell.X, L.Bell.Y, L.BellR * (1.25f + 0.15f * FMath::Sin(Time * 5.f)), FLinearColor(0.4f, 1.f, 0.5f, 0.22f), 28);
+			Circle(L.Bell.X, L.Bell.Y, L.BellR * (1.15f + 0.25f * FMath::Frac(Time * 1.2f)), FLinearColor(0.5f, 1.f, 0.6f, 0.7f * (1.f - FMath::Frac(Time * 1.2f))), 3.f, 32);
+		}
+		const float TW = (120.f + 16.f * Rdy) * U, TH = (46.f + 6.f * Rdy) * U;
+		Tex(UITex(TEXT("S_BtnOk")), L.Bell.X - TW * 0.5f, L.Bell.Y - L.BellR - TH - 6.f * U - Bn, TW, TH, Rdy > 0.f ? FLinearColor(0.8f, 1.35f, 0.8f, 1.f) : bHover ? FLinearColor(1.2f, 1.2f, 1.2f, 1.f) : FLinearColor::White);
+		Text(K.BellRing > 0.f ? TEXT("DING!") : TEXT("Serve"), L.Bell.X, L.Bell.Y - L.BellR - TH + 4.f * U - Bn, 20.f + 2.f * Rdy, FLinearColor::White, true);
 	}
 
 	// --- ingredient tiles
@@ -1653,12 +1704,12 @@ void AAbyssHUD::DrawCounter(AAbyssGameMode* GM, ARestaurantDome* Dome)
 		const bool bHover = L.SlotAt(M) == i;
 		const FCItem BI = FKitchenCounter::BarItem(i);
 		const bool bEmpty = BI.Kind == ECItem::Fillet && GM->Stock[BI.Fish] <= 0;
-		const float Lift = bHover ? 6.f * U : 0.f;
+		const float Lift = (bHover ? 8.f * U : 0.f) - K.TilePress[i] * 12.f * U;
 		const float TS = L.SlotSize;
-		const TCHAR* Tile = BI.Kind == ECItem::Lemon ? TEXT("S_Tile_Lemon") : BI.Kind == ECItem::Greens ? TEXT("S_Tile_Parsley") : TEXT("S_TileEmpty");
+		const TCHAR* Tile = TEXT("S_TileEmpty");   // every ingredient is drawn on the same empty tile now
 		Tex(UITex(Tile), SP.X, SP.Y - Lift, TS, TS * 204.f / 216.f, bEmpty ? FLinearColor(0.5f, 0.5f, 0.5f, 1.f) : FLinearColor::White);
-		if (BI.Kind != ECItem::Lemon && BI.Kind != ECItem::Greens)
-			DrawCounterItem(BI, SP + FVector2D(TS * 0.5f, TS * 0.45f - Lift), TS * 0.62f, bEmpty ? 0.35f : 1.f, TS * 0.84f);
+		if (bHover && !bEmpty) Disc(SP.X + TS * 0.5f, SP.Y + TS * 0.5f - Lift, TS * 0.6f, FLinearColor(1.f, 0.85f, 0.4f, 0.16f + 0.06f * FMath::Sin(Time * 7.f)), 28);
+		DrawCounterItem(BI, SP + FVector2D(TS * 0.5f, TS * (BI.Kind == ECItem::Fillet ? 0.56f : 0.47f) - Lift), TS * (bHover && !bEmpty ? 0.82f : 0.74f), bEmpty ? 0.35f : 1.f, TS * 0.9f);
 		if (BI.Kind == ECItem::Fillet)
 		{
 			const int32 Pr = GM->Prime[BI.Fish], No = GM->Stock[BI.Fish] - Pr;
@@ -1682,7 +1733,7 @@ void AAbyssHUD::DrawCounter(AAbyssGameMode* GM, ARestaurantDome* Dome)
 	}
 
 	// --- clipboard tickets
-	static const TCHAR* Cards[] = { TEXT("S_Card_Sashimi"), TEXT("S_Card_Grill"), TEXT("S_Card_Platter"), TEXT("Dish_3"), TEXT("Dish_4") };
+	static const TCHAR* Cards[] = { TEXT("Dish_0"), TEXT("Dish_1"), TEXT("Dish_2"), TEXT("Dish_3"), TEXT("Dish_4") };
 	for (int32 t = 0; t < Queue.Num() && t < 4; ++t)
 	{
 		ARestaurantCustomer* C = Queue[t];
@@ -1698,8 +1749,8 @@ void AAbyssHUD::DrawCounter(AAbyssGameMode* GM, ARestaurantDome* Dome)
 		const float CS = 112.f * U;
 		const float CS2 = 100.f * U;
 		(void)CS;
-		Tex(UITex(Cards[FMath::Clamp(C->Dish, 0, 4)]), TP.X + TS.X * 0.5f - CS2 * 0.5f, TP.Y + 36.f * U, CS2, C->Dish >= 3 ? CS2 : CS2 * 106.f / 102.f);
-		Text(R.Name, TP.X + TS.X * 0.5f, TP.Y + 140.f * U, 15.f, Ink, true);
+		Tex(UITex(Cards[FMath::Clamp(C->Dish, 0, 4)]), TP.X + TS.X * 0.5f - CS2 * 0.5f, TP.Y + 36.f * U, CS2, CS2);
+		Text(R.Name, TP.X + TS.X * 0.5f, TP.Y + 138.f * U, 17.f, Ink, true);
 		{
 			// tonight's seasoning for this dish, and what the guest fancies
 			const int32 Mn = GM->SeasonCount(GM->MenuMain[C->Dish]) > 0 ? GM->MenuMain[C->Dish] : 0;
@@ -1707,15 +1758,13 @@ void AAbyssHUD::DrawCounter(AAbyssGameMode* GM, ARestaurantDome* Dome)
 			FString Sea = AbyssLoc::Translate(AbyssData::Season(Mn).Name);
 			if (Sd > 0) Sea += TEXT(" + ") + AbyssLoc::Translate(AbyssData::Season(Sd).Name);
 			const bool bHit = C->Taste != ETaste::None && (AbyssData::Season(Mn).Taste == C->Taste || AbyssData::Season(Sd).Taste == C->Taste);
-			Text(Sea, TP.X + TS.X * 0.5f, TP.Y + 160.f * U, 12.f, FLinearColor(0.42f, 0.3f, 0.16f), true);
+			Text(Sea, TP.X + TS.X * 0.5f, TP.Y + 161.f * U, 13.f, FLinearColor(0.42f, 0.3f, 0.16f), true);
 			if (C->Taste != ETaste::None)
 			{
-				const FString TL = FString::Printf(TEXT("likes %s"), AbyssData::TasteName(C->Taste));
-				const float TW2 = TextW(TL, 12.f) + 14.f * U;
-				const FLinearColor TC = AbyssData::TasteColor(C->Taste);
-				Panel(TP.X + TS.X - TW2 - 14.f * U, TP.Y + 22.f * U, TW2, 20.f * U, FLinearColor(TC.R * 0.35f, TC.G * 0.35f, TC.B * 0.35f, 0.95f));
-				if (bHit) Border(TP.X + TS.X - TW2 - 14.f * U, TP.Y + 22.f * U, TW2, 20.f * U, Green, 2.f);
-				Text(TL, TP.X + TS.X - TW2 * 0.5f - 14.f * U, TP.Y + 24.f * U, 12.f, bHit ? FLinearColor(0.7f, 1.f, 0.7f) : FLinearColor::White, true);
+				const float IS2 = 46.f * U;
+				const FVector2D IC(TP.X + TS.X - 30.f * U, TP.Y + 46.f * U);
+				if (bHit) Disc(IC.X, IC.Y, IS2 * 0.62f, FLinearColor(0.4f, 1.f, 0.5f, 0.55f + 0.25f * FMath::Sin(Time * 5.f)), 24);
+				TasteIcon(C->Taste, IC.X, IC.Y, IS2);
 			}
 		}
 		TMap<int32, int32> Need, Have;
@@ -1809,18 +1858,55 @@ void AAbyssHUD::DrawCounter(AAbyssGameMode* GM, ARestaurantDome* Dome)
 		Text(bOpenNow ? TEXT("OPEN") : TEXT("CLOSED"), L.SignPos.X + L.SignSize.X * 0.5f, L.SignPos.Y + (bOpenNow ? L.SignSize.Y * 0.56f : 24.f * U) - 20.f * U, 34.f, FLinearColor(1.f, 0.9f, 0.62f), true);
 	}
 
-	Panel(W * 0.5f - 420.f * U, L.BarPos.Y - 31.f * U, 840.f * U, 26.f * U, FLinearColor(0.02f, 0.04f, 0.1f, 0.8f));
+	const float TipY = L.TicketPos[0].Y + L.TicketSize.Y + 14.f * U;
+	Panel(W * 0.5f - 430.f * U, TipY - 4.f * U, 860.f * U, 30.f * U, FLinearColor(0.02f, 0.04f, 0.1f, 0.78f));
+	Border(W * 0.5f - 430.f * U, TipY - 4.f * U, 860.f * U, 30.f * U, FLinearColor(0.9f, 0.68f, 0.3f, 0.6f), 1.5f);
 	Text(ActiveR && *ActiveR->Focus ? FString::Printf(TEXT("%s  -  %s"), *AbyssLoc::Translate(ActiveR->Name), *AbyssLoc::Translate(ActiveR->Focus)) : FString(TEXT("Drag ingredients   |   drag the knife down the gold lines   |   knobs set the heat   |   ring the bell to serve")),
-		W * 0.5f, L.BarPos.Y - 29.f * U, 17.f, FLinearColor(1.f, 0.92f, 0.7f, 1.f), true);
+		W * 0.5f, TipY, 18.f, FLinearColor(1.f, 0.92f, 0.7f, 1.f), true);
 
-	if (K.Drag.IsValid() && !((K.DragFromPanActive() || K.bDragFromPot) && FVector2D::Distance(M, K.DownAt) < 8.f * U)) DrawCounterItem(K.Drag, M, 104.f * U, 0.95f);
+	// cut flash on the board
+	if (K.BoardFlash > 0.f)
+	{
+		const float FX = L.Board.Min.X + (L.Board.Max.X - L.Board.Min.X) * K.LastCutX;
+		Line(FX, L.Board.Min.Y - 6.f * U, FX, L.Board.Max.Y + 6.f * U, FLinearColor(1.f, 1.f, 1.f, K.BoardFlash), 2.f + 6.f * K.BoardFlash);
+	}
+	// drop targets light up for what is in hand
+	if (K.Drag.IsValid())
+	{
+		const float Pu = 0.5f + 0.3f * FMath::Sin(Time * 6.f);
+		if (K.Drag.Kind == ECItem::Fillet && !K.Board.IsValid())
+			Border(L.Board.Min.X, L.Board.Min.Y, L.Board.Max.X - L.Board.Min.X, L.Board.Max.Y - L.Board.Min.Y, FLinearColor(0.5f, 1.f, 0.55f, L.InBoard(M) ? 1.f : Pu), L.InBoard(M) ? 5.f : 3.f);
+		if (K.Drag.Kind == ECItem::Kelp || K.Drag.Kind == ECItem::Sashimi || K.Drag.Kind == ECItem::Greens)
+			Circle(L.Pot.X, L.Pot.Y - L.PotR * 0.3f, L.PotR * 0.62f, FLinearColor(0.5f, 1.f, 0.55f, L.InPot(M) ? 1.f : Pu), L.InPot(M) ? 5.f : 3.f, 40);
+	}
+	if (K.PotSplash > 0.f) Circle(L.Pot.X, L.Pot.Y - L.PotR * 0.3f, L.PotR * (0.3f + 0.5f * (1.f - K.PotSplash)), FLinearColor(0.8f, 0.95f, 1.f, 0.8f * K.PotSplash), 3.f, 36);
+	// something dropped nowhere glides back to where it came from
+	if (K.Fly.IsValid() && K.FlyT < 1.f)
+	{
+		const float E = 1.f - FMath::Square(1.f - K.FlyT);
+		DrawCounterItem(K.Fly, FMath::Lerp(K.FlyFrom, K.FlyTo, E), 104.f * U * (1.f - 0.4f * E), 0.9f * (1.f - 0.6f * E));
+	}
+	for (const FKitchenCounter::FSpark& Sp : K.Sparks)
+	{
+		const float A = FMath::Clamp(Sp.Life / Sp.Max, 0.f, 1.f);
+		Disc(Sp.P.X, Sp.P.Y, Sp.Size * U * (0.5f + 0.5f * A), FLinearColor(Sp.C.R, Sp.C.G, Sp.C.B, A), 8);
+	}
+	if (K.Drag.IsValid() && !((K.DragFromPanActive() || K.bDragFromPot) && FVector2D::Distance(M, K.DownAt) < 8.f * U))
+	{
+		// in hand: lifted (shadow underneath), a touch larger, trailing behind the movement
+		const FVector2D Lag = -K.DragVel.GetClampedToMaxSize(900.f) * 0.012f;
+		Disc(M.X + 6.f * U, M.Y + 34.f * U, 40.f * U, FLinearColor(0.f, 0.f, 0.f, 0.22f), 20);
+		DrawCounterItem(K.Drag, M + Lag + FVector2D(0.f, -8.f * U), 118.f * U, 1.f);
+	}
 
 	if (K.FeedbackTime > 0.f)
 	{
 		FLinearColor C = K.FeedbackColor;
 		C.A = FMath::Clamp(K.FeedbackTime * 2.f, 0.f, 1.f);
 		const FVector2D At = K.FeedbackAt.IsZero() ? FVector2D(W * 0.5f, H * 0.5f) : K.FeedbackAt;
-		Text(K.Feedback, At.X, At.Y - 60.f * U - (1.4f - K.FeedbackTime) * 30.f * U, 26.f, C, true);
+		// pops in big, then settles and floats up
+		const float Pop = FMath::Clamp((K.FeedbackTime - 1.42f) / 0.18f, 0.f, 1.f);
+		Text(K.Feedback, At.X, At.Y - 60.f * U - (1.6f - K.FeedbackTime) * 30.f * U, 26.f + 12.f * Pop, C, true);
 	}
 
 	// side panels

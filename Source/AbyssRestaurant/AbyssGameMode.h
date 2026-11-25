@@ -11,6 +11,7 @@ class ASubmarinePawn;
 class ADiverPawn;
 class ARestaurantWalker;
 class AAbyssBait;
+class AAquariumTank;
 
 // Owns the day loop: Explore (sub + diver) -> Restaurant (night service, separate interior space)
 // -> Summary (upgrades) -> next day.
@@ -53,6 +54,41 @@ public:
 	int32 DishFinalPrice(int32 Dish, bool bPrimeFish, int32 Main, int32 Side) const;
 	void OpenRestaurant();                        // prep -> service
 
+	// --- aquarium: fish caught alive (net / claw) can be sold, cooked, or put on show.
+	// On show they bring ticket money and extra guests every night and get studied, but cost upkeep and cannot be cooked.
+	int32 Live[AbyssData::NumFish] = {};          // how many of Stock[] are alive
+	TArray<FTankFish> Tank;
+	int32 TankSlots = 3;
+	static constexpr int32 MaxTankSlots = 6;
+	int32 Studied[AbyssData::NumFish] = {};       // nights each species has been on show
+	int32 PrepTab = 0;                            // 0 menu + market, 1 aquarium
+	int32 NightTickets = 0, NightUpkeep = 0;
+	bool TankAdd(int32 Fish);
+	bool TankRemove(int32 Index);
+	bool SellLive(int32 Fish);
+	bool ExpandTank();
+	int32 ExpandCost() const { return 300 * (TankSlots - 2); }
+	int32 TankTicketsPerNight() const;
+	int32 TankUpkeepPerNight() const;
+	int32 TankExtraGuests() const;
+	bool IsStudied(EFishType Type) const { return Studied[(int32)Type] >= AbyssData::ResearchNights; }
+	void RefreshTank();
+
+	// --- guided first day: a coach panel walks the player through the whole loop, one step at a time
+	enum { TutorialSteps = 16 };
+	bool bTutorial = false;
+	int32 TutStep = 0;
+	float TutTime = 0.f;       // time on the current step
+	float TutMoved = 0.f;      // seconds spent moving (step 1)
+	bool bTutLight0 = true;    // searchlight state when step 2 began
+	bool bTutSawAquarium = false;
+	bool IsTutorial() const { return bTutorial; }
+	void StartTutorial();
+	void ToggleTutorial();     // [F1]: skip / replay
+	void TickTutorial(float Dt);
+	// title + up to three lines of text for the current step (English; translated when drawn)
+	void TutorialText(FString& Title, TArray<FString>& Lines) const;
+
 	// --- bait for luring groupers
 	int32 Bait = 2;
 	int32 BaitBoughtNow = 0;
@@ -93,7 +129,7 @@ public:
 	static constexpr int32 MaxUpgrade = 3;
 
 	void ShowToast(const FString& Msg, const FLinearColor& Color = FLinearColor::White, float Duration = 2.5f);
-	bool AddFish(EFishType Type, bool bPrime = false);
+	bool AddFish(EFishType Type, bool bPrime = false, bool bAlive = false);
 	// takes one fish out of the fridge; returns true when it was a prime one
 	bool TakeFish(int32 Fish, bool bWantPrime = true);
 	int32 CargoCount() const;
@@ -136,6 +172,7 @@ private:
 	TWeakObjectPtr<ADiverPawn> Diver;
 	TWeakObjectPtr<ARestaurantWalker> Walker;
 	TWeakObjectPtr<AAbyssBait> ActiveBait;
+	TWeakObjectPtr<AAquariumTank> TankActor;
 	bool bAutoTestPrepShot = false;
 	bool bPlacedSub = false;
 	// -AbyssAutoTest: scripted playtest that logs state and takes screenshots, then quits
@@ -144,6 +181,9 @@ private:
 	int32 AutoTestStep = 0;
 	bool bAutoTestChefPosed = false, bAutoTestChefShot = false, bAutoTestPropsPosed = false, bAutoTestPropsShot = false, bAutoTestAerialPosed = false, bAutoTestAerialShot = false, bAutoTestOutsidePosed = false, bAutoTestOutsideShot = false, bAutoTestBookPosed = false, bAutoTestBookShot = false, bAutoTestKitchenShot = false, bAutoTestKitchenShot2 = false, bAutoTestKitchenBack = false, bAutoTestSummaryShot = false;
 	void TickAutoTest(float Dt);
+	void TutNext();
+	void SpawnTutorialFish();
+	bool bTutFishSpawned = false;
 	FTimerHandle FadeTimer;
 
 	void PlaceSubAtDock();

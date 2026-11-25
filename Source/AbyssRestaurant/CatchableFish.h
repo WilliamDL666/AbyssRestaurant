@@ -57,6 +57,10 @@ public:
 	// Where it will be in a few seconds (tuna follow their loop)
 	FVector PredictRoute(float Seconds) const;
 	FVector GetDen() const { return Den; }
+	// extra yaw for the Tripo tuna so its nose points along +X (0 or 180)
+	static constexpr float TunaModelYaw = 0.f;
+	// A fish model for show (the aquarium): runtime components under Parent, returns its root + the tail pivot to wag
+	static USceneComponent* MakeDisplayFish(AActor* Owner, USceneComponent* Parent, EFishType Type, float Scale, USceneComponent*& OutTail);
 
 private:
 	UPROPERTY() TObjectPtr<USceneComponent> Visual;

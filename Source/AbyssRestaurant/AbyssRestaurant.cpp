@@ -50,16 +50,43 @@ namespace AbyssData
 		return Dish >= 0 && Dish < NumFish ? Dish : -1;
 	}
 
+	int32 LiveSalePrice(EFishType Type, bool bPrime)
+	{
+		return FMath::RoundToInt(Fish(Type).Price * 0.6f * (bPrime ? 1.f + PrimeBonus : 1.f));
+	}
+
+	int32 TankTicket(EFishType Type, bool bPrime)
+	{
+		static const int32 T[NumFish] = { 15, 30, 90 };
+		return FMath::RoundToInt(T[FMath::Clamp((int32)Type, 0, NumFish - 1)] * (bPrime ? 1.3f : 1.f));
+	}
+
+	int32 TankUpkeep(EFishType Type)
+	{
+		static const int32 U[NumFish] = { 5, 10, 25 };
+		return U[FMath::Clamp((int32)Type, 0, NumFish - 1)];
+	}
+
+	const TCHAR* ResearchNote(EFishType Type)
+	{
+		switch (Type)
+		{
+		case EFishType::Yellowtail: return TEXT("Schools read your speed, not your distance. They settle 25% faster now.");
+		case EFishType::Tuna:       return TEXT("It only bolts from what closes in on it. It is 25% slower to spook now.");
+		default:                    return TEXT("Light bothers it more than noise. It is 25% slower to spook now.");
+		}
+	}
+
 	static const FSeasonDef GSeason[NumSeason] =
 	{
 		{ TEXT("House Style"),   0, 0,  0, 0, 1.00f, 1.00f, ETaste::None,  TEXT("No seasoning. Always available.") },
 		{ TEXT("Sea Salt"),      0, 0,  4, 0, 1.08f, 1.08f, ETaste::Salty, TEXT("Cheap and steady. Never spoils.") },
 		{ TEXT("Soy Sauce"),     0, 0,  5, 0, 1.10f, 1.10f, ETaste::Rich,  TEXT("Cheap and steady. Never spoils.") },
 		{ TEXT("Chili Oil"),     0, 0,  6, 0, 1.10f, 1.10f, ETaste::Spicy, TEXT("Cheap and steady. Never spoils.") },
-		{ TEXT("Abyss Saffron"), 0, 2, 40, 0, 1.12f, 1.60f, ETaste::Rich,  TEXT("Rare. Wasted on ordinary fish - makes a PRIME catch a signature dish.") },
+		{ TEXT("Abyss Saffron"), 0, 2, 40, 0, 1.12f, 1.35f, ETaste::Rich,  TEXT("Rare. Wasted on ordinary fish - makes a PRIME catch a signature dish.") },
 		{ TEXT("Fresh Yuzu"),    1, 1,  9, 2, 1.15f, 1.15f, ETaste::Fresh, TEXT("Fresh garnish. Keeps 2 nights.") },
 		{ TEXT("Shiso Leaf"),    1, 1,  6, 3, 1.09f, 1.09f, ETaste::Fresh, TEXT("Fresh garnish. Keeps 3 nights.") },
-		{ TEXT("Sea Urchin"),    1, 1, 30, 1, 1.32f, 1.32f, ETaste::Rich,  TEXT("Luxury garnish. Spoils after tonight!") },
+		{ TEXT("Sea Urchin"),    1, 1, 30, 1, 1.22f, 1.22f, ETaste::Rich,  TEXT("Luxury garnish. Spoils after tonight!") },
 	};
 
 	const FSeasonDef& Season(int32 Id)

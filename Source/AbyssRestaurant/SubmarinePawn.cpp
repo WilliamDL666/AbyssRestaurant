@@ -49,7 +49,7 @@ ASubmarinePawn::ASubmarinePawn()
 	Headlight->SetOuterConeAngle(24.f);
 	Headlight->SetCastShadows(true);
 	Headlight->bCastVolumetricShadow = true;
-	Headlight->VolumetricScatteringIntensity = 4.f;
+	Headlight->VolumetricScatteringIntensity = 1.2f;
 	Headlight->SourceRadius = 12.f;
 
 	SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
@@ -444,7 +444,8 @@ void ASubmarinePawn::Tick(float Dt)
 	if (GM && GM->Phase == EAbyssPhase::Explore && (bControlsEnabled || GM->IsDiving()))
 	{
 		const float Drain = bControlsEnabled ? (0.45f + 0.55f * Speed01) * (bBoost ? 1.8f : 1.f) * (bLightOn ? 1.f : 0.8f) : 0.25f;
-		Battery01 = FMath::Max(0.f, Battery01 - Dt * Drain / GM->BatterySeconds());
+		// (no battery worries while the tutorial is teaching the controls)
+		if (!GM->IsTutorial()) Battery01 = FMath::Max(0.f, Battery01 - Dt * Drain / GM->BatterySeconds());
 		if (Battery01 <= 0.f)
 		{
 			GM->EnterRestaurant(true);
@@ -526,7 +527,7 @@ void ASubmarinePawn::UpdateTarget(float Dt)
 			{
 				const FFishDef& D = Target->Def();
 				const bool bPrime = bTargetPrime;
-				if (GM && GM->AddFish(Target->Type, bPrime))
+				if (GM && GM->AddFish(Target->Type, bPrime, true))
 				{
 					if (bPrime) GM->ShowToast(FString::Printf(TEXT("PRIME catch: %s!  Sells for +35%%"), D.Name), FLinearColor(1.f, 0.85f, 0.3f), 3.f);
 					else GM->ShowToast(FString::Printf(TEXT("Caught: %s (ordinary) - it was spooked. %s"), D.Name, AbyssData::PrimeTip(Target->Type)), FLinearColor(0.4f, 1.f, 0.8f), 4.f);
@@ -547,7 +548,7 @@ void ASubmarinePawn::UpdateTarget(float Dt)
 	if (BeamMat)
 	{
 		BeamMat->SetVectorParameterValue(TEXT("Color"), bCatching ? FLinearColor(0.5f, 1.f, 0.75f) : FLinearColor(1.f, 0.95f, 0.75f));
-		BeamMat->SetScalarParameterValue(TEXT("Intensity"), bCatching ? 0.07f : 0.035f);
+		BeamMat->SetScalarParameterValue(TEXT("Intensity"), bCatching ? 0.05f : 0.018f);
 	}
 }
 

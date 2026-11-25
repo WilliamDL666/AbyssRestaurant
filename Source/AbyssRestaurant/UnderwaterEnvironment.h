@@ -38,21 +38,22 @@ public:
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UParticleSystemComponent> Dust;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UAudioComponent> Ambience;
 
-	UPROPERTY(EditAnywhere, Category = "Underwater|Shallow") float SunLux = 9.f;
+	UPROPERTY(EditAnywhere, Category = "Underwater|Shallow") float SunLux = 13.f;
 	UPROPERTY(EditAnywhere, Category = "Underwater|Shallow") FLinearColor SunColor = FLinearColor(0.75f, 0.95f, 1.0f);
-	UPROPERTY(EditAnywhere, Category = "Underwater|Shallow") FLinearColor WaterColor = FLinearColor(0.015f, 0.13f, 0.19f);
+	UPROPERTY(EditAnywhere, Category = "Underwater|Shallow") FLinearColor WaterColor = FLinearColor(0.02f, 0.17f, 0.27f);
 	UPROPERTY(EditAnywhere, Category = "Underwater|Shallow") FLinearColor VolumetricAlbedo = FLinearColor(0.3f, 0.75f, 0.9f);
 	UPROPERTY(EditAnywhere, Category = "Underwater|Shallow") float FogDensity = 0.032f;
-	UPROPERTY(EditAnywhere, Category = "Underwater|Shallow") float AmbientIntensity = 1.0f;
+	UPROPERTY(EditAnywhere, Category = "Underwater|Shallow") float AmbientIntensity = 1.8f;
 
 	UPROPERTY(EditAnywhere, Category = "Underwater|Abyss") FLinearColor AbyssWaterColor = FLinearColor(0.0f, 0.004f, 0.008f);
 	UPROPERTY(EditAnywhere, Category = "Underwater|Abyss") float AbyssFogDensity = 0.08f;
 	UPROPERTY(EditAnywhere, Category = "Underwater|Abyss") float DarkStartMeters = 45.f;
 	UPROPERTY(EditAnywhere, Category = "Underwater|Abyss") float DarkFullMeters = 130.f;
 
-	UPROPERTY(EditAnywhere, Category = "Underwater|Realism") float UnderwaterPostStrength = 0.55f;
+	UPROPERTY(EditAnywhere, Category = "Underwater|Realism") float UnderwaterPostStrength = 0.3f;
 	UPROPERTY(EditAnywhere, Category = "Underwater|Realism") float GodRayIntensity = 0.018f;
 	UPROPERTY(EditAnywhere, Category = "Underwater|Realism") int32 NumGodRays = 36;
+	UPROPERTY(EditAnywhere, Category = "Underwater|Realism") bool bShowRayMeshes = false;
 	// Pack SM_GodRay meshes rendered as dark slabs here (lighting interaction) - keep our soft additive rays
 	UPROPERTY(EditAnywhere, Category = "Underwater|Realism") bool bUsePackGodRays = false;
 	// Fog density multiplier while inside the restaurant (keeps the windows blue, the room clear)

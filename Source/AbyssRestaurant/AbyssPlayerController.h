@@ -29,6 +29,7 @@ private:
 	void UpgradeOxygen();
 	void ToggleLanguage();
 	void ToggleRecipeBook();
+	void ToggleTutorial();
 	void DebugRestaurant();
 	void UpgradeRestaurant();
 };

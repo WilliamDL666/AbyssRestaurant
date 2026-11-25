@@ -39,6 +39,7 @@ void AAbyssPlayerController::SetupInputComponent()
 	Bind(TEXT("DebugRestaurant"), &AAbyssPlayerController::DebugRestaurant);
 	Bind(TEXT("UpgradeRestaurant"), &AAbyssPlayerController::UpgradeRestaurant);
 	Bind(TEXT("RecipeBook"), &AAbyssPlayerController::ToggleRecipeBook);
+	Bind(TEXT("Tutorial"), &AAbyssPlayerController::ToggleTutorial);
 }
 
 void AAbyssPlayerController::Order(int32 Index)
@@ -160,6 +161,11 @@ void AAbyssPlayerController::DebugRestaurant()
 void AAbyssPlayerController::UpgradeRestaurant()
 {
 	if (AAbyssGameMode* GM = AAbyssGameMode::Get(this)) GM->TryUpgrade(3);
+}
+
+void AAbyssPlayerController::ToggleTutorial()
+{
+	if (AAbyssGameMode* GM = AAbyssGameMode::Get(this)) GM->ToggleTutorial();
 }
 
 void AAbyssPlayerController::ToggleRecipeBook()

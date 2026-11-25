@@ -394,4 +394,59 @@ hook = lathe("HookRing", [(0.012, 0.064), (0.016, 0.064), (0.016, 0.068), (0.012
 bt.append(hook)
 bt.append(rbox("HookLine", (0.003, 0.003, 0.05), "Steel", bevel=0.3, segs=1, loc=(0, 0, 0.09)))
 icon_named("UI_Bait", bt)
+# ------------------------------------------------------------------ fish portraits (side view) for the aquarium screen
+def tint(name, col):
+    b = M[name].node_tree.nodes.get("Principled BSDF")
+    b.inputs["Base Color"].default_value = (*col, 1)
+
+LOOK = {
+    "Yellowtail": ((0.35, 0.55, 0.75), (0.92, 0.93, 0.95), (1.0, 0.82, 0.15), (0.95, 0.78, 0.2)),
+    "Tuna": ((0.08, 0.14, 0.3), (0.8, 0.83, 0.88), (0.45, 0.55, 0.7), (0.3, 0.35, 0.5)),
+    "Grouper": ((0.45, 0.18, 0.75), (0.75, 0.6, 0.9), (0.2, 1.0, 0.85), (0.2, 0.75, 0.75)),
+}
+for i, key in enumerate(["Yellowtail", "Tuna", "Grouper"]):
+    o, tl = fish[key]
+    back, belly, stripe, fin = LOOK[key]
+    tint("Back", back); tint("Belly", belly); tint("Stripe", stripe); tint("Fin", fin)
+    for ob, x in ((o, 0.0), (tl, -0.55)):
+        ob.location = (x, 0, 0)
+        ob.rotation_euler = (math.radians(-90), 0, 0)
+    bpy.context.view_layer.update()
+    render([o, tl], "UI_Fish_%d" % i, 512, 256, view="top", pad=1.06)
+
+# ------------------------------------------------------------------ display tank for the dining room (temporary until the Tripo one)
+AQ = os.path.join(os.path.dirname(FISH), "Aquarium")
+os.makedirs(AQ, exist_ok=True)
+for k, v in {"Base": pmat("Base", (0.03, 0.07, 0.22), 0.3), "TGold": pmat("Gold", (0.9, 0.62, 0.2), 0.3, metal=1.0),
+             "TGlass": pmat("Glass", (0.7, 0.85, 0.9), 0.05), "Sand": pmat("Sand", (0.75, 0.68, 0.5), 0.9)}.items():
+    M[k] = v
+tank = []
+R = 1.45
+tank.append(lathe("TBase", [(0.0, 0.0), (R + 0.32, 0.0), (R + 0.34, 0.06), (R + 0.26, 0.14), (R + 0.2, 0.4), (R + 0.26, 0.5), (R + 0.22, 0.62), (0.0, 0.62)], "Base", segs=64))
+tank.append(lathe("TFoot", [(R + 0.3, 0.0), (R + 0.38, 0.0), (R + 0.38, 0.07), (R + 0.3, 0.09)], "TGold", segs=64))
+tank.append(lathe("TRing1", [(R + 0.2, 0.5), (R + 0.3, 0.5), (R + 0.3, 0.6), (R + 0.2, 0.64)], "TGold", segs=64))
+tank.append(lathe("TSand", [(0.0, 0.62), (R - 0.03, 0.62), (R - 0.03, 0.7), (R * 0.6, 0.76), (0.0, 0.72)], "Sand", segs=48))
+tank.append(lathe("TGlassWall", [(R, 0.62), (R, 2.95)], "TGlass", segs=64))
+tank.append(lathe("TRing2", [(R - 0.02, 2.9), (R + 0.26, 2.9), (R + 0.3, 2.98), (R + 0.24, 3.06), (R - 0.02, 3.06)], "TGold", segs=64))
+tank.append(lathe("TLid", [(0.0, 3.04), (R + 0.2, 3.04), (R + 0.16, 3.2), (R * 0.7, 3.42), (R * 0.3, 3.52), (0.0, 3.54)], "Base", segs=64))
+tank.append(lathe("TKnob", [(0.0, 3.52), (0.16, 3.52), (0.2, 3.62), (0.12, 3.74), (0.0, 3.78)], "TGold", segs=32))
+for i in range(12):
+    a = 2 * math.pi * i / 12
+    # shells on the base, pearls of light under the lid
+    sh = ellipsoid("TShell%d" % i, (0.05, 0.16, 0.14), "TGold", (math.cos(a) * (R + 0.22), math.sin(a) * (R + 0.22), 0.3), sub=2)
+    sh.rotation_euler = (0, 0, a)
+    tank.append(sh)
+    tank.append(ellipsoid("TPearl%d" % i, (0.07, 0.07, 0.07), "Glow", (math.cos(a + 0.26) * (R + 0.2), math.sin(a + 0.26) * (R + 0.2), 2.86), sub=2))
+for i in range(9):
+    a = rng.uniform(0, 6.28); rr = rng.uniform(0.5, 1.15); h = rng.uniform(0.3, 0.75)
+    c = lathe("TCoral%d" % i, [(0.0, 0.0), (0.08, 0.0), (0.05, h * 0.6), (0.085, h), (0.0, h + 0.06)], "Coral", segs=10)
+    c.location = (math.cos(a) * rr, math.sin(a) * rr, 0.68)
+    c.rotation_euler = (rng.uniform(-0.2, 0.2), rng.uniform(-0.2, 0.2), 0)
+    tank.append(c)
+tank_o = keep_join("SM_AquariumTank", tank)
+export_to(tank_o, AQ, "SM_AquariumTank")
+UI_BACKUP = UI
+UI = AQ
+render([tank_o], "preview_tank", 700, 900, view="persp", pad=1.1)
+UI = UI_BACKUP
 print("FISH DONE")

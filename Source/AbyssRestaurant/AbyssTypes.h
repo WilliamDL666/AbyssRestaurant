@@ -62,6 +62,13 @@ enum class ESeason : uint8
 	Count
 };
 
+// A live fish on show in the restaurant's display tank
+struct FTankFish
+{
+	EFishType Type = EFishType::Yellowtail;
+	bool bPrime = false;
+};
+
 struct FSeasonDef
 {
 	const TCHAR* Name;
@@ -125,6 +132,13 @@ namespace AbyssData
 	ABYSSRESTAURANT_API const TCHAR* MethodName(ECatchMethod Method);
 	// Which fish a dish uses (-1 = none)
 	ABYSSRESTAURANT_API int32 DishFish(int32 Dish);
+	// Aquarium: what a live fish sells for, earns in tickets per night, and costs to keep per night
+	ABYSSRESTAURANT_API int32 LiveSalePrice(EFishType Type, bool bPrime);
+	ABYSSRESTAURANT_API int32 TankTicket(EFishType Type, bool bPrime);
+	ABYSSRESTAURANT_API int32 TankUpkeep(EFishType Type);
+	// What a species' research (nights on show) teaches
+	ABYSSRESTAURANT_API const TCHAR* ResearchNote(EFishType Type);
+	constexpr int32 ResearchNights = 2;
 	ABYSSRESTAURANT_API const FSeasonDef& Season(int32 Id);
 	ABYSSRESTAURANT_API const TCHAR* TasteName(ETaste T);
 	ABYSSRESTAURANT_API FLinearColor TasteColor(ETaste T);

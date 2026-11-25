@@ -40,8 +40,8 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Sub") float BoostMultiplier = 1.9f;
 	UPROPERTY(EditAnywhere, Category = "Sub") float BaseCatchRange = 2200.f;
 	UPROPERTY(EditAnywhere, Category = "Sub") float CatchConeDegrees = 16.f;
-	UPROPERTY(EditAnywhere, Category = "Sub") float HeadlightCandela = 5000.f;
-	UPROPERTY(EditAnywhere, Category = "Sub") bool bShowFakeBeam = true;
+	UPROPERTY(EditAnywhere, Category = "Sub") float HeadlightCandela = 1800.f;
+	UPROPERTY(EditAnywhere, Category = "Sub") bool bShowFakeBeam = false;
 
 	// Imported hull model (Tripo etc). If the asset exists it replaces the placeholder hull,
 	// auto-scaled to HullLength and aligned along its longest axis. Flip with HullYawOffset = 180 if it faces backwards.

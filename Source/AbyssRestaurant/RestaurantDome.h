@@ -111,6 +111,7 @@ public:
 	float CarryScore = 0.f, CarryMult = 1.f;
 	int32 CarryDish = -1;
 	bool bCarryPrime = false;      // made with a prime catch
+	bool bHasBooths = false;
 	int32 CarryMain = 0, CarrySide = 0;   // seasoning / garnish actually used
 	bool IsCarrying() const { return CarryFor.IsValid(); }
 	ARestaurantCustomer* GetCarryTarget() const { return CarryFor.Get(); }
@@ -132,6 +133,9 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Service") int32 MaxConcurrentOrders = 2;
 	UPROPERTY(EditAnywhere, Category = "Service") float SpawnInterval = 7.f;
 	UPROPERTY(EditAnywhere, Category = "Service") float BasePatience = 70.f;
+	// which way the user's fridge / booth models face (their fronts are not on the same axis)
+	UPROPERTY(EditAnywhere, Category = "Lux") float FridgeYaw = 0.f;
+	UPROPERTY(EditAnywhere, Category = "Lux") float BoothYaw = 90.f;
 
 	FTransform GetDockSpawn() const;
 	FVector GetDockLocation() const { return GetActorTransform().TransformPosition(DockLocal()); }

@@ -37,7 +37,7 @@ AUnderwaterEnvironment::AUnderwaterEnvironment()
 	Sun->SetRelativeRotation(FRotator(-72.f, 35.f, 0.f));
 	Sun->SetCastShadows(true);
 	Sun->bCastVolumetricShadow = true;
-	Sun->VolumetricScatteringIntensity = 1.6f;
+	Sun->VolumetricScatteringIntensity = 2.4f;
 	Sun->DynamicShadowDistanceMovableLight = 12000.f;
 
 	Ambient = CreateDefaultSubobject<USkyLightComponent>(TEXT("Ambient"));
@@ -52,7 +52,7 @@ AUnderwaterEnvironment::AUnderwaterEnvironment()
 	Fog->SetVolumetricFog(true);
 	Fog->SetVolumetricFogScatteringDistribution(0.75f);
 	Fog->SetVolumetricFogExtinctionScale(1.0f);
-	Fog->SetVolumetricFogDistance(7000.f);
+	Fog->SetVolumetricFogDistance(12000.f);
 	Fog->SetFogMaxOpacity(1.f);
 
 	Post = CreateDefaultSubobject<UPostProcessComponent>(TEXT("Post"));
@@ -122,7 +122,7 @@ void AUnderwaterEnvironment::OnConstruction(const FTransform& Transform)
 	S.bOverride_SceneColorTint = true;
 	S.SceneColorTint = FLinearColor(0.92f, 1.0f, 1.04f);
 	S.bOverride_VignetteIntensity = true;
-	S.VignetteIntensity = 0.45f;
+	S.VignetteIntensity = 0.3f;
 	S.bOverride_FilmGrainIntensity = true;
 	S.FilmGrainIntensity = 0.f;
 	S.bOverride_MotionBlurAmount = true;
@@ -137,10 +137,7 @@ void AUnderwaterEnvironment::OnConstruction(const FTransform& Transform)
 		UnderwaterPP = UMaterialInstanceDynamic::Create(PPM, this);
 		S.WeightedBlendables.Array.Add(FWeightedBlendable(1.f, UnderwaterPP));
 	}
-	if (UMaterialInterface* PackPP = LoadMat(TEXT("/Game/AlienOceanEnvironment/Materials/Effects/MI_PP_UnderwaterCameraEffect.MI_PP_UnderwaterCameraEffect")))
-	{
-		S.WeightedBlendables.Array.Add(FWeightedBlendable(1.f, PackPP));
-	}
+	// (the pack's camera effect on top of ours smeared the picture - one underwater pass is enough)
 
 	// God rays: long soft additive cylinders tilted along the sun direction
 	UStaticMesh* RayMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/AlienOceanEnvironment/Meshes/SM_GodRay.SM_GodRay"), nullptr, LOAD_NoWarn | LOAD_Quiet);
@@ -277,7 +274,8 @@ void AUnderwaterEnvironment::UpdateRays(const FVector& Cam, float A, float I)
 		if (bPackRays) RayMat->SetScalarParameterValue(TEXT("Glow"), RayBaseGlow * FMath::Square(1.f - A) * (1.f - I));
 		else RayMat->SetScalarParameterValue(TEXT("Intensity"), GodRayIntensity * FMath::Square(1.f - A) * (1.f - I));
 	}
-	GodRays->SetVisibility(A < 0.95f && I < 0.95f);
+	// the solid cylinders read as hard slabs; the sun's own volumetric shafts through the caustics do the job
+	GodRays->SetVisibility(bShowRayMeshes && A < 0.95f && I < 0.95f);
 }
 
 void AUnderwaterEnvironment::ApplyLook(float A, float I)
@@ -288,7 +286,7 @@ void AUnderwaterEnvironment::ApplyLook(float A, float I)
 	Sun->SetLightColor(SunColor);
 
 	Ambient->SetIntensity(AmbientIntensity * (1.f - 0.92f * A));
-	Ambient->SetLowerHemisphereColor(Water * 4.f);
+	Ambient->SetLowerHemisphereColor(Water * 7.f);
 
 	Fog->SetFogInscatteringColor(Water);
 	Fog->SetFogDensity(FMath::Lerp(FogDensity, AbyssFogDensity, A) * FMath::Lerp(1.f, InteriorFogScale, I));

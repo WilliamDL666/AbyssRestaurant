@@ -21,6 +21,23 @@ namespace
 		return T == EFishType::Yellowtail ? TEXT("Yellowtail") : T == EFishType::Tuna ? TEXT("Tuna") : TEXT("Grouper");
 	}
 
+	// A finished, textured fish model (Tripo): /Game/Abyss/Fish/SM_<Key>Model. Fitted to the same 110 cm length with
+	// its long axis on +X. Returns false when there is none.
+	bool AddTexturedFish(AActor* Owner, USceneComponent* Parent, EFishType T, bool bConstruction)
+	{
+		UStaticMesh* M = LoadObject<UStaticMesh>(nullptr, *FString::Printf(TEXT("/Game/Abyss/Fish/SM_%sModel.SM_%sModel"), FishKey(T), FishKey(T)), nullptr, LOAD_NoWarn | LOAD_Quiet);
+		if (!M) return false;
+		const FBox B = M->GetBoundingBox();
+		const FVector Sz = B.GetSize();
+		const bool bLongY = Sz.Y > Sz.X;
+		const float Sc = 110.f / FMath::Max(bLongY ? Sz.Y : Sz.X, 1.f);
+		// which way the nose points along that axis differs per model
+		const float Yaw = (bLongY ? -90.f : 0.f) + (T == EFishType::Tuna ? ACatchableFish::TunaModelYaw : 0.f);
+		const FRotator Rot(0.f, Yaw, 0.f);
+		AbyssAssets::AddPart(Owner, Parent, M, -Rot.RotateVector(B.GetCenter() * Sc), Rot, FVector(Sc), nullptr, false, bConstruction);
+		return true;
+	}
+
 	// Blender fish (Scripts/blender_make_fish.py): slots Back / Belly / Fin / Eye / Stripe get the species colors
 	void PaintFish(AActor* Owner, UStaticMeshComponent* C, const FFishDef& D)
 	{
@@ -40,6 +57,39 @@ namespace
 			C->SetMaterial(i, Mat);
 		}
 	}
+}
+
+USceneComponent* ACatchableFish::MakeDisplayFish(AActor* Owner, USceneComponent* Parent, EFishType Type, float Scale, USceneComponent*& OutTail)
+{
+	using namespace AbyssAssets;
+	const FFishDef& D = AbyssData::Fish(Type);
+	USceneComponent* Root = NewObject<USceneComponent>(Owner);
+	Root->SetupAttachment(Parent);
+	Root->RegisterComponent();
+	Root->SetRelativeScale3D(FVector(Scale));
+	OutTail = NewObject<USceneComponent>(Owner);
+	OutTail->SetupAttachment(Root);
+	OutTail->RegisterComponent();
+	UStaticMesh* BodyMesh = LoadObject<UStaticMesh>(nullptr, *FString::Printf(TEXT("/Game/Abyss/Fish/SM_Fish_%s.SM_Fish_%s"), FishKey(Type), FishKey(Type)), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	UStaticMesh* TailMesh = LoadObject<UStaticMesh>(nullptr, *FString::Printf(TEXT("/Game/Abyss/Fish/SM_FishTail_%s.SM_FishTail_%s"), FishKey(Type), FishKey(Type)), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	if (AddTexturedFish(Owner, Root, Type, false))
+	{
+		OutTail->SetRelativeLocation(FVector(-48.f, 0.f, 0.f));
+	}
+	else if (BodyMesh && TailMesh)
+	{
+		const FBoxSphereBounds B = BodyMesh->GetBounds();
+		OutTail->SetRelativeLocation(FVector(B.Origin.X - B.BoxExtent.X + 3.f, 0.f, 0.f));
+		PaintFish(Owner, AddPart(Owner, Root, BodyMesh, FVector::ZeroVector, FRotator::ZeroRotator, FVector(1.f), nullptr, false, false), D);
+		PaintFish(Owner, AddPart(Owner, OutTail, TailMesh, FVector::ZeroVector, FRotator::ZeroRotator, FVector(1.f), nullptr, false, false), D);
+	}
+	else
+	{
+		OutTail->SetRelativeLocation(FVector(-48.f, 0.f, 0.f));
+		AddPart(Owner, Root, Sphere(), FVector::ZeroVector, FRotator::ZeroRotator, FVector(1.1f, 0.32f, 0.45f), Lit(Owner, D.Body, 0.35f, 0.25f, D.Glow), false, false);
+		AddPart(Owner, OutTail, Cone(), FVector(-12.f, 0.f, 0.f), FRotator(90.f, 0.f, 0.f), FVector(0.3f, 0.03f, 0.35f), Lit(Owner, D.Fin, 0.5f, 0.f, D.Glow), false, false);
+	}
+	return Root;
 }
 
 ACatchableFish::ACatchableFish()
@@ -68,7 +118,12 @@ void ACatchableFish::BuildVisual()
 	UStaticMesh* BodyMesh = LoadObject<UStaticMesh>(nullptr, *FString::Printf(TEXT("/Game/Abyss/Fish/SM_Fish_%s.SM_Fish_%s"), FishKey(Type), FishKey(Type)), nullptr, LOAD_NoWarn | LOAD_Quiet);
 	UStaticMesh* TailMesh = LoadObject<UStaticMesh>(nullptr, *FString::Printf(TEXT("/Game/Abyss/Fish/SM_FishTail_%s.SM_FishTail_%s"), FishKey(Type), FishKey(Type)), nullptr, LOAD_NoWarn | LOAD_Quiet);
 	bModel = BodyMesh && TailMesh;
-	if (bModel)
+	if (AddTexturedFish(this, Visual, Type, true))
+	{
+		bModel = true;
+		TailPivot->SetRelativeLocation(FVector(-48.f, 0.f, 0.f));
+	}
+	else if (bModel)
 	{
 		// the model is ~110 cm long, head on +X; the tail piece was exported with its origin on the tail joint
 		const FBoxSphereBounds B = BodyMesh->GetBounds();
@@ -309,6 +364,8 @@ void ACatchableFish::TickSenses(float Dt, const FVector& P)
 			break;
 		}
 	}
+	// a species that has been studied in the display tank is easier to read
+	if (const AAbyssGameMode* GMS = AAbyssGameMode::Get(this)) { if (GMS->IsStudied(Type)) Gain *= 0.75f; }
 	if (Gain > 0.f)
 	{
 		const bool bWasBelow = Alarm < 1.f;

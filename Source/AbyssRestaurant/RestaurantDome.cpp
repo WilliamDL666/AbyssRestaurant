@@ -1,6 +1,7 @@
 #include "RestaurantDome.h"
 #include "RestaurantCustomer.h"
 #include "AbyssGameMode.h"
+#include "AbyssSfx.h"
 #include "AbyssAssets.h"
 #include "AbyssTypes.h"
 #include "Camera/CameraComponent.h"
@@ -340,6 +341,9 @@ void ARestaurantDome::BuildInterior(bool bFurniture)
 	UMaterialInterface* Kelp    = Lit(this, FLinearColor(0.15f, 0.5f, 0.15f), 0.6f, 0.f, 0.3f);
 	UMaterialInterface* Sand    = Lit(this, FLinearColor(0.6f, 0.55f, 0.4f), 0.9f);
 
+	// (the lux layout has the real display tank - AAquariumTank - in the middle instead)
+	if (!bUseLuxLevel)
+	{
 	// Central aquarium column
 	AddPart(this, Root, Cylinder(), FVector(0.f, 0.f, 20.f), FRotator::ZeroRotator, FVector(3.8f, 3.8f, 0.4f), Metal, true);
 	AddPart(this, Root, Cylinder(), FVector(0.f, 0.f, 265.f), FRotator::ZeroRotator, FVector(3.3f, 3.3f, 4.5f), nullptr, true)->SetVisibility(false);
@@ -361,6 +365,7 @@ void ARestaurantDome::BuildInterior(bool bFurniture)
 	AddPart(this, Root, Cylinder(), FVector(0.f, 0.f, 650.f), FRotator::ZeroRotator, FVector(6.4f, 6.4f, 0.12f), Lantern);
 	AddPart(this, Root, Cylinder(), FVector(0.f, 0.f, 651.f), FRotator::ZeroRotator, FVector(5.8f, 5.8f, 0.14f), Metal);
 	AddPart(this, Root, Cylinder(), FVector(0.f, 0.f, 590.f), FRotator::ZeroRotator, FVector(0.1f, 0.1f, 1.2f), Metal);
+	}
 
 	// Dining ring: 7 tables, 2 seats each
 	Seats.Reset();
@@ -623,7 +628,7 @@ void ARestaurantDome::SpawnCustomer()
 
 	ARestaurantCustomer* C = GetWorld()->SpawnActor<ARestaurantCustomer>(ARestaurantCustomer::StaticClass(), T);
 	if (!C) return;
-	C->Init(this, SeatIdx, PickDish(), GetActorTransform().TransformPosition(S.Table), BasePatience + FMath::FRandRange(0.f, 25.f), FMath::RandRange(0, 17));
+	C->Init(this, SeatIdx, PickDish(), GetActorTransform().TransformPosition(S.Table), (BasePatience + FMath::FRandRange(0.f, 25.f)) * (AAbyssGameMode::Get(this) && AAbyssGameMode::Get(this)->IsTutorial() ? 2.f : 1.f), FMath::RandRange(0, 17));
 	// most guests follow tonight's craving, some have their own taste, a few don't care
 	{
 		const AAbyssGameMode* GMT = AAbyssGameMode::Get(this);
@@ -759,6 +764,7 @@ void ARestaurantDome::DeliverDish()
 	int32 Tip = FMath::RoundToInt(Price * 0.35f * C->Patience01() * (CarryScore >= 70.f ? 1.f : 0.3f));
 	if (bTaste) Tip = Tip * 2 + FMath::RoundToInt(Price * 0.1f);
 	GM->Money += Earned + Tip;
+	AbyssSfx::Play(this, bTaste ? TEXT("Sparkle") : TEXT("Coin"));
 	GM->NightEarned += Earned + Tip;
 	GM->NightServed++;
 	GM->LifetimeServed++;
@@ -781,6 +787,7 @@ void ARestaurantDome::TakeOrder(ARestaurantCustomer* C)
 {
 	if (!C || !C->WantsToOrder()) return;
 	C->TakeOrder();
+	AbyssSfx::Play(this, TEXT("Pop"));
 	if (AAbyssGameMode* GM = AAbyssGameMode::Get(this))
 	{
 		GM->ShowToast(FString::Printf(TEXT("Order taken: %s"), *AbyssData::DishName(C->Dish)), FLinearColor(1.f, 0.9f, 0.6f), 1.6f);
@@ -805,6 +812,7 @@ void ARestaurantDome::OnCustomerGaveUp(ARestaurantCustomer* C)
 	}
 	if (Kitchen.bActive && Kitchen.For.Get() == C) Kitchen.Cancel();
 	C->Leave(true);
+	AbyssSfx::Play(this, TEXT("Error"));
 	if (AAbyssGameMode* GM = AAbyssGameMode::Get(this))
 	{
 		GM->NightLeft++;
@@ -893,7 +901,13 @@ void ARestaurantDome::Tick(float Dt)
 		GetComponents(Comps);
 		for (UStaticMeshComponent* C : Comps)
 		{
-			if (C->ComponentHasTag(TEXT("JellyLamp"))) JellyLamps.Add({ C, C->GetRelativeLocation(), (float)C->GetRelativeRotation().Yaw });
+			if (!C->ComponentHasTag(TEXT("JellyLamp"))) continue;
+			// nothing hangs into the display tank in the middle of the room
+			const FVector RL = C->GetRelativeLocation();
+			const bool bOverTank = FVector2D(RL.X, RL.Y).Size() < 360.f;
+			const bool bInKitchen = FMath::Abs(RL.X) < KitchenHalfW + 80.f && RL.Y > KitchenRowY - 140.f && RL.Y < KitchenIslandY + 260.f;
+			if (bUseLuxLevel && (bOverTank || bInKitchen)) { C->SetRelativeScale3D(FVector(0.001f)); C->SetCastShadow(false); continue; }
+			JellyLamps.Add({ C, RL, (float)C->GetRelativeRotation().Yaw });
 		}
 	}
 	for (int32 j = 0; j < JellyLamps.Num(); ++j)
@@ -1676,6 +1690,50 @@ bool ARestaurantDome::BuildLuxInterior()
 		Pieces[0].At = FVector(KitchenHalfW - 60.f, KitchenRowY + 250.f, 0.f);                      // shelf on the right wall
 		Pieces[2].At = FVector(0.f, KitchenIslandY, 0.f);                                          // island
 	}
+	// The fitted kitchen designed in Blender (Scripts/blender_make_kitchen_set.py): floor, walls, hood, sink, shelves,
+	// pot rack, crates... one mesh whose slots are named after their materials. Its origin is the foot of the back wall.
+	UStaticMesh* KitSet = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Abyss/Kitchen/SM_KitchenSet.SM_KitchenSet"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+	if (KitSet)
+	{
+		UStaticMeshComponent* KC = AddPart(this, Root, KitSet, FVector(0.f, KitchenRowY - 90.f, 7.f), FRotator::ZeroRotator, FVector(1.f, -1.f, 1.f), nullptr, false);   // the FBX import flips Y: flip it back so +Y is the open front
+		struct FSlotLook { const TCHAR* Name; FLinearColor C; float Rough, Metal, Emit; };
+		static const FSlotLook Looks[] = {
+			{ TEXT("NavyLight"), FLinearColor(0.035f, 0.09f, 0.24f), 0.35f, 0.1f, 0.f }, { TEXT("Navy"), FLinearColor(0.012f, 0.03f, 0.1f), 0.45f, 0.f, 0.f },
+			{ TEXT("Brass"), FLinearColor(0.85f, 0.6f, 0.25f), 0.25f, 1.f, 0.f }, { TEXT("Teal"), FLinearColor(0.012f, 0.075f, 0.11f), 0.5f, 0.f, 0.f },
+			{ TEXT("Pearl"), FLinearColor(0.2f, 0.23f, 0.26f), 0.5f, 0.f, 0.f }, { TEXT("WoodLight"), FLinearColor(0.5f, 0.34f, 0.2f), 0.6f, 0.f, 0.f },
+			{ TEXT("Wood"), FLinearColor(0.26f, 0.14f, 0.07f), 0.55f, 0.f, 0.f }, { TEXT("Copper"), FLinearColor(0.85f, 0.42f, 0.22f), 0.25f, 1.f, 0.f },
+			{ TEXT("Iron"), FLinearColor(0.04f, 0.04f, 0.045f), 0.4f, 1.f, 0.f }, { TEXT("SeaGlow"), FLinearColor(0.15f, 0.65f, 0.95f), 0.2f, 0.f, 2.2f },
+			{ TEXT("Warm"), FLinearColor(1.f, 0.78f, 0.45f), 0.3f, 0.f, 6.f }, { TEXT("Cream"), FLinearColor(0.7f, 0.64f, 0.5f), 0.6f, 0.f, 0.f },
+			{ TEXT("Green"), FLinearColor(0.12f, 0.42f, 0.15f), 0.6f, 0.f, 0.f }, { TEXT("Red"), FLinearColor(0.65f, 0.1f, 0.07f), 0.5f, 0.f, 0.f },
+			{ TEXT("Yellow"), FLinearColor(0.9f, 0.72f, 0.12f), 0.5f, 0.f, 0.f }, { TEXT("Glass"), FLinearColor(0.5f, 0.7f, 0.75f), 0.1f, 0.2f, 0.f },
+			{ TEXT("Rope"), FLinearColor(0.6f, 0.5f, 0.33f), 0.9f, 0.f, 0.f }, { TEXT("Slate"), FLinearColor(0.05f, 0.06f, 0.07f), 0.7f, 0.f, 0.f } };
+		const TArray<FStaticMaterial>& KSlots = KitSet->GetStaticMaterials();
+		for (int32 i = 0; KC && i < KSlots.Num(); ++i)
+		{
+			const FString N = KSlots[i].MaterialSlotName.ToString();
+			for (const FSlotLook& Lk : Looks)
+			{
+				// (NavyLight / WoodLight are listed before Navy / Wood so the longer name wins)
+				if (N.StartsWith(Lk.Name)) { KC->SetMaterial(i, Lit(this, Lk.C, Lk.Rough, Lk.Metal, Lk.Emit)); break; }
+			}
+		}
+		// invisible blockers where the set's walls are, so the cook cannot walk through them and the camera stays inside
+		{
+			const float KY0 = KitchenRowY - 90.f, KD = (KitchenIslandY + 160.f) - KY0;
+			auto Block = [&](const FVector& At, const FVector& Size)
+			{
+				if (UStaticMeshComponent* B = AddPart(this, Root, Cube(), At, FRotator::ZeroRotator, Size / 100.f, nullptr, true)) B->SetVisibility(false);
+			};
+			Block(FVector(0.f, KY0 - 15.f, 135.f), FVector(KitchenHalfW * 2.f + 60.f, 30.f, 270.f));
+			Block(FVector(KitchenHalfW + 15.f, KY0 + KD * 0.4f, 135.f), FVector(30.f, KD * 0.8f, 270.f));
+			Block(FVector(-KitchenHalfW - 15.f, KY0 + KD * 0.275f, 58.f), FVector(30.f, KD * 0.55f, 116.f));
+		}
+		// work lights: warm over the island and the sink, a cool wash from the portholes
+		AddPointLight(this, Root, Pieces[2].At + FVector(0.f, 0.f, 215.f), FLinearColor(1.f, 0.8f, 0.55f), 30.f * LS, 520.f, false);
+		AddPointLight(this, Root, FVector(-55.f, KitchenRowY + 20.f, 200.f), FLinearColor(1.f, 0.85f, 0.65f), 12.f * LS, 380.f, false);
+		for (float PX : { -150.f, 140.f }) AddPointLight(this, Root, FVector(PX, KitchenRowY - 30.f, 162.f), FLinearColor(0.3f, 0.7f, 1.f), 14.f * LS, 260.f, false);
+	}
+	else
 	{
 		// raised kitchen floor, back wall with an anchor banner, low side walls (all visual, walker walks over the floor)
 		UMaterialInterface* Tile = Lit(this, FLinearColor(0.62f, 0.6f, 0.66f), 0.25f, 0.f);
@@ -1704,7 +1762,8 @@ bool ARestaurantDome::BuildLuxInterior()
 			AddPart(this, Root, Cube(), FVector(X, Y0 + L * 0.5f, SX > 0.f ? 252.f : 122.f), FRotator::ZeroRotator, FVector(0.36f, L / 100.f, 0.06f), BrassW, false);
 		}
 		if (UStaticMesh* PackShelf = Lux(TEXT("SM_LUX_Shelf_01")))
-			AddPart(this, Root, PackShelf, FVector(-KitchenHalfW + 40.f, (Y0 + Y1) * 0.5f + 40.f, 0.f), FRotator(0.f, -90.f, 0.f), FVector(1.f), nullptr, false);
+			if (!LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Abyss/Kitchen/SM_SeafoodFridge.SM_SeafoodFridge"), nullptr, LOAD_NoWarn | LOAD_Quiet))
+				AddPart(this, Root, PackShelf, FVector(-KitchenHalfW + 40.f, (Y0 + Y1) * 0.5f + 40.f, 0.f), FRotator(0.f, -90.f, 0.f), FVector(1.f), nullptr, false);
 		if (UStaticMesh* PlantM = Lux(TEXT("SM_LUX_Plant_01")))
 			for (float SX : { -1.f, 1.f }) AddPart(this, Root, PlantM, FVector(SX * (KitchenHalfW + 10.f), Y1 + 40.f, 0.f), FRotator(0.f, SX * 40.f, 0.f), FVector(1.1f), nullptr, false);
 		// hanging pan rail over the stove + brass lanterns at the wall corners
@@ -1715,6 +1774,108 @@ bool ARestaurantDome::BuildLuxInterior()
 			const FVector LP(SX * (KitchenHalfW - 10.f), Y0 + 20.f, 225.f);
 			AddPart(this, Root, Sphere(), LP, FRotator::ZeroRotator, FVector(0.3f), LampM, false);
 			AddPointLight(this, Root, LP + FVector(0.f, 40.f, 0.f), FLinearColor(0.5f, 0.85f, 1.f), 30.f * LS, 500.f, false);
+		}
+
+		// ---- fitted-out kitchen: one palette (navy enamel, brass, pearl tile, warm light) carried through every surface
+		// (kept dark and matte: under the work lights a glossy pale tile washed out to white)
+		UMaterialInterface* PearlT = Lit(this, FLinearColor(0.34f, 0.42f, 0.46f), 0.5f, 0.f);
+		UMaterialInterface* TealT  = Lit(this, FLinearColor(0.025f, 0.13f, 0.19f), 0.45f, 0.f);
+		UMaterialInterface* DeepT  = Lit(this, FLinearColor(0.03f, 0.08f, 0.22f), 0.18f, 0.2f);
+		UMaterialInterface* IronK  = Lit(this, FLinearColor(0.04f, 0.04f, 0.045f), 0.4f, 1.f);
+		UMaterialInterface* CopperK = Lit(this, FLinearColor(0.85f, 0.42f, 0.22f), 0.22f, 1.f);
+		UMaterialInterface* WarmK  = Lit(this, FLinearColor(1.f, 0.78f, 0.45f), 0.3f, 0.f, 7.f);
+		UMaterialInterface* SeaGlow = Lit(this, FLinearColor(0.15f, 0.65f, 0.95f), 0.2f, 0.f, 2.2f);
+		const float FW = KitchenHalfW * 2.f;
+		// checkerboard floor: navy tiles laid into the pearl floor, a brass-edged runner where the cook walks
+		{
+			UInstancedStaticMeshComponent* Dark = AddInstanced(this, Root, Cube(), DeepT, false);
+			const float TS = 76.f;
+			const int32 NX = FMath::FloorToInt(FW / TS), NY = FMath::FloorToInt(D / TS);
+			const float OX = -NX * TS * 0.5f, OY = Y0 + (D - NY * TS) * 0.5f;
+			for (int32 ix = 0; ix < NX; ++ix)
+				for (int32 iy = 0; iy < NY; ++iy)
+					if ((ix + iy) % 2 == 0)
+						Dark->AddInstance(FTransform(FRotator::ZeroRotator, FVector(OX + (ix + 0.5f) * TS, OY + (iy + 0.5f) * TS, 3.2f), FVector(TS / 100.f - 0.02f, TS / 100.f - 0.02f, 0.012f)));
+			const float RY = (KitchenRowY + KitchenIslandY) * 0.5f + 20.f;
+			AddPart(this, Root, Cube(), FVector(0.f, RY, 4.2f), FRotator::ZeroRotator, FVector(FW * 0.72f / 100.f, 1.1f, 0.012f), BrassW, false);
+			AddPart(this, Root, Cube(), FVector(0.f, RY, 4.8f), FRotator::ZeroRotator, FVector(FW * 0.72f / 100.f - 0.1f, 1.0f, 0.012f), TealT, false);
+		}
+		// tiled backsplash along the back wall with a scalloped brass-and-pearl crown
+		{
+			AddPart(this, Root, Cube(), FVector(0.f, Y0 + 1.f, 150.f), FRotator::ZeroRotator, FVector(FW / 100.f - 0.1f, 0.05f, 1.05f), TealT, false);
+			UInstancedStaticMeshComponent* Grout = AddInstanced(this, Root, Cube(), PearlT, false);
+			for (float Z = 100.f; Z < 202.f; Z += 34.f)
+				Grout->AddInstance(FTransform(FRotator::ZeroRotator, FVector(0.f, Y0 + 3.6f, Z), FVector(FW / 100.f - 0.14f, 0.012f, 0.025f)));
+			for (float X = -KitchenHalfW + 34.f; X < KitchenHalfW; X += 34.f)
+				Grout->AddInstance(FTransform(FRotator::ZeroRotator, FVector(X, Y0 + 3.6f, 150.f), FVector(0.025f, 0.012f, 1.03f)));
+			UInstancedStaticMeshComponent* Scallop = AddInstanced(this, Root, Cylinder(), PearlT, false);
+			UInstancedStaticMeshComponent* ScRim = AddInstanced(this, Root, Cylinder(), BrassW, false);
+			for (float X = -KitchenHalfW + 30.f; X < KitchenHalfW - 10.f; X += 52.f)
+			{
+				Scallop->AddInstance(FTransform(FRotator(0.f, 0.f, 90.f), FVector(X, Y0 + 4.f, 206.f), FVector(0.46f, 0.46f, 0.04f)));
+				ScRim->AddInstance(FTransform(FRotator(0.f, 0.f, 90.f), FVector(X, Y0 + 3.f, 206.f), FVector(0.52f, 0.52f, 0.03f)));
+			}
+		}
+		// extractor hood over the stove: navy canopy, brass band, a flue up the wall, warm lamps under it
+		{
+			const FVector SP = Pieces[1].At;
+			const float HW = Pieces[1].Width * 1.05f;
+			AddPart(this, Root, Cube(), SP + FVector(0.f, 20.f, 285.f), FRotator::ZeroRotator, FVector(HW / 100.f, 0.95f, 0.4f), DeepT, false);
+			AddPart(this, Root, Cube(), SP + FVector(0.f, 20.f, 264.f), FRotator::ZeroRotator, FVector(HW / 100.f + 0.06f, 1.01f, 0.07f), BrassW, false);
+			AddPart(this, Root, Cube(), SP + FVector(0.f, 20.f, 306.f), FRotator::ZeroRotator, FVector(HW / 100.f + 0.06f, 1.01f, 0.05f), BrassW, false);
+			AddPart(this, Root, Cube(), SP + FVector(0.f, -10.f, 350.f), FRotator::ZeroRotator, FVector(0.55f, 0.4f, 0.9f), DeepT, false);
+			AddPart(this, Root, Cube(), SP + FVector(0.f, -10.f, 396.f), FRotator::ZeroRotator, FVector(0.62f, 0.46f, 0.06f), BrassW, false);
+			for (float DX : { -0.3f, 0.3f }) AddPart(this, Root, Cylinder(), SP + FVector(DX * HW, 30.f, 261.f), FRotator::ZeroRotator, FVector(0.16f, 0.16f, 0.03f), WarmK, false);
+			// copper pans on the rail, biggest first
+			for (int32 i = 0; i < 4; ++i)
+			{
+				const float R = 19.f - i * 3.f;
+				const FVector PP = SP + FVector((-0.36f + i * 0.24f) * HW, -42.f, 250.f - 16.f - R);
+				AddPart(this, Root, Cylinder(), PP, FRotator(0.f, 0.f, 90.f), FVector(R / 50.f, R / 50.f, 0.035f), i % 2 ? IronK : CopperK, false);
+				AddPart(this, Root, Cube(), PP + FVector(0.f, 0.f, R + 8.f), FRotator::ZeroRotator, FVector(0.03f, 0.02f, 0.18f), BrassW, false);
+			}
+		}
+		// two brass portholes looking out into the sea, either side of the banner
+		for (float SX : { -1.f, 1.f })
+		{
+			const FVector PC(BX + SX * 105.f, Y0 + 4.f, 178.f);
+			AddPart(this, Root, Cylinder(), PC, FRotator(0.f, 0.f, 90.f), FVector(0.62f, 0.62f, 0.05f), BrassW, false);
+			AddPart(this, Root, Cylinder(), PC + FVector(0.f, 1.5f, 0.f), FRotator(0.f, 0.f, 90.f), FVector(0.5f, 0.5f, 0.05f), SeaGlow, false);
+			AddPart(this, Root, Cube(), PC + FVector(0.f, 3.5f, 0.f), FRotator::ZeroRotator, FVector(0.5f, 0.012f, 0.03f), BrassW, false);
+			AddPart(this, Root, Cube(), PC + FVector(0.f, 3.5f, 0.f), FRotator::ZeroRotator, FVector(0.03f, 0.012f, 0.5f), BrassW, false);
+			for (int32 b = 0; b < 6; ++b)
+			{
+				const float A = b * PI / 3.f;
+				AddPart(this, Root, Sphere(), PC + FVector(FMath::Cos(A) * 28.f, 3.5f, FMath::Sin(A) * 28.f), FRotator::ZeroRotator, FVector(0.045f), BrassW, false);
+			}
+			AddPointLight(this, Root, PC + FVector(0.f, 50.f, 0.f), FLinearColor(0.3f, 0.7f, 1.f), 14.f * LS, 260.f, false);
+		}
+		// three shell pendants over the island on brass rods
+		{
+			const FVector IC = Pieces[2].At;
+			UStaticMesh* ShellP = Prop(TEXT("SM_ShellLamp"));
+			for (int32 i = -1; i <= 1; ++i)
+			{
+				const FVector LP = IC + FVector(i * 125.f, 0.f, 262.f);
+				AddPart(this, Root, Cylinder(), LP + FVector(0.f, 0.f, 110.f), FRotator::ZeroRotator, FVector(0.018f, 0.018f, 2.f), BrassW, false);
+				// small brass shades (the shell prop is far too big to hang in front of the cook's camera)
+				(void)ShellP;
+				AddPart(this, Root, Cone(), LP + FVector(0.f, 0.f, 10.f), FRotator::ZeroRotator, FVector(0.34f, 0.34f, 0.24f), BrassW, false);
+				AddPart(this, Root, Sphere(), LP - FVector(0.f, 0.f, 6.f), FRotator::ZeroRotator, FVector(0.13f), WarmK, false);
+			}
+			AddPointLight(this, Root, IC + FVector(0.f, 0.f, 200.f), FLinearColor(1.f, 0.8f, 0.55f), 55.f * LS, 520.f, false);
+		}
+		// the low wall on the left: little corals in brass pots along its cap; a shell crest crowns the back wall
+		{
+			UStaticMesh* PotCoral[2] = { Prop(TEXT("SM_BrainCoral")), Prop(TEXT("SM_CoralFan")) };
+			UMaterialInterface* CoralK[2] = { Lit(this, FLinearColor(1.f, 0.5f, 0.6f), 0.6f, 0.f, 0.5f), Lit(this, FLinearColor(0.45f, 0.85f, 0.8f), 0.6f, 0.f, 0.5f) };
+			for (int32 i = 0; i < 3; ++i)
+			{
+				const FVector PP(-(KitchenHalfW + 15.f), Y0 + 60.f + i * 105.f, 125.f);
+				AddPart(this, Root, Cylinder(), PP + FVector(0.f, 0.f, 8.f), FRotator::ZeroRotator, FVector(0.2f, 0.2f, 0.16f), BrassW, false);
+				if (PotCoral[i % 2]) AddPart(this, Root, PotCoral[i % 2], PP + FVector(0.f, 0.f, 14.f), FRotator(0.f, i * 70.f, 0.f), FVector(i % 2 ? 0.45f : 0.3f), CoralK[i % 2], false);
+			}
+			if (UStaticMesh* Crest = Prop(TEXT("SM_ShellLamp"))) AddPart(this, Root, Crest, FVector(BX, Y0 - 6.f, 252.f), FRotator(0.f, 0.f, 0.f), FVector(0.45f), BrassW, false);
 		}
 	}
 	for (int32 k = 0; k < 4; ++k)
@@ -1735,6 +1896,28 @@ bool ARestaurantDome::BuildLuxInterior()
 		{
 			AddPart(this, Root, Cube(), Pieces[k].At + FVector(0.f, 0.f, 45.f), FRotator::ZeroRotator, FVector(Pieces[k].Width / 100.f, 0.6f, 0.9f), k == 2 ? Wood : Steel, true);
 		}
+	}
+	// more of the user's models: scaled to a real height, standing on the floor at a dome-local spot
+	auto PlaceModel = [&](const TCHAR* Path, float Height, const FVector& At, float Yaw, bool bCollide) -> bool
+	{
+		UStaticMesh* M = LoadObject<UStaticMesh>(nullptr, Path, nullptr, LOAD_NoWarn | LOAD_Quiet);
+		if (!M) return false;
+		const FBox B = M->GetBoundingBox();
+		const float Sc = Height / FMath::Max(B.GetSize().Z, 1.f);
+		const FRotator Rot(0.f, Yaw, 0.f);
+		const FVector Cn = Rot.RotateVector(FVector(B.GetCenter().X, B.GetCenter().Y, B.Min.Z) * Sc);
+		if (UStaticMeshComponent* C = AddPart(this, Root, M, At - Cn, Rot, FVector(Sc), nullptr, bCollide)) C->SetCastShadow(true);
+		return true;
+	};
+	// the seafood display fridge stands on the left side of the kitchen, facing in (mirrors the shelf on the right)
+	PlaceModel(TEXT("/Game/Abyss/Kitchen/SM_SeafoodFridge.SM_SeafoodFridge"), 125.f, FVector(-KitchenHalfW + 58.f, KitchenRowY + 170.f, 0.f), FridgeYaw, true);   // long side along the wall, glass towards the room
+	// three booths on the far side of the display tank, backs to the room, open towards the fish
+	bHasBooths = false;
+	for (int32 k = 0; k < 3; ++k)
+	{
+		const float A = FMath::DegreesToRadians(30.f + k * 60.f);
+		const FVector Dir(FMath::Cos(A), FMath::Sin(A), 0.f);
+		bHasBooths |= PlaceModel(TEXT("/Game/Abyss/Props/SM_Booth.SM_Booth"), 150.f, Dir * 410.f, FMath::RadiansToDegrees(A) + BoothYaw, true);
 	}
 	KitchenSpot[0] = Pieces[3].At + FVector(0.f, KitchenStandOff, 0.f);   // slice: prep table
 	KitchenSpot[1] = Pieces[1].At + FVector(0.f, KitchenStandOff, 0.f);   // cook: stove
@@ -1796,20 +1979,41 @@ bool ARestaurantDome::BuildLuxInterior()
 			if (k % 3 == 0 && (bInteriorSpace || k % 6 == 0)) AddPointLight(this, Root, Dir * (Radius - 220.f) + FVector(0.f, 0.f, 120.f), Accents[(k / 3) % 3], 70.f * LS, 900.f, false);
 		}
 		UE_LOG(LogTemp, Log, TEXT("Dreamy pass: %d jelly lamps, %d corals"), L, NC);
+		// the centre of the room: an inlaid navy-and-gold medallion under the display tank, ringed with low corals and soft lights
+		{
+			UMaterialInterface* RimM = Lit(this, FLinearColor(0.85f, 0.6f, 0.25f), 0.25f, 1.f);
+			UMaterialInterface* InlayM = Lit(this, FLinearColor(0.03f, 0.07f, 0.2f), 0.18f, 0.3f);
+			AbyssAssets::AddPart(this, Root, AbyssAssets::Cylinder(), FVector(0.f, 0.f, 1.2f), FRotator::ZeroRotator, FVector(9.2f, 9.2f, 0.02f), RimM, false);
+			AbyssAssets::AddPart(this, Root, AbyssAssets::Cylinder(), FVector(0.f, 0.f, 1.6f), FRotator::ZeroRotator, FVector(8.9f, 8.9f, 0.02f), InlayM, false);
+			AbyssAssets::AddPart(this, Root, AbyssAssets::Cylinder(), FVector(0.f, 0.f, 2.f), FRotator::ZeroRotator, FVector(5.4f, 5.4f, 0.02f), RimM, false);
+			AbyssAssets::AddPart(this, Root, AbyssAssets::Cylinder(), FVector(0.f, 0.f, 2.4f), FRotator::ZeroRotator, FVector(5.2f, 5.2f, 0.02f), InlayM, false);
+			for (int32 k = 0; k < 8; ++k)
+			{
+				const float A = 2.f * PI * (k + 0.5f) / 8.f;
+				const FVector Dir(FMath::Cos(A), FMath::Sin(A), 0.f);
+				const int32 c = k % 3;
+				if (CoralMs[c] && !(bHasBooths && Dir.Y > 0.f)) AbyssAssets::AddPart(this, Root, CoralMs[c], Dir * 330.f, FRotator(0.f, k * 47.f, 0.f), FVector(c == 2 ? 0.7f : 1.1f), CoralMats[c], false);
+				if (k % 2 == 0) AddPointLight(this, Root, Dir * 360.f + FVector(0.f, 0.f, 60.f), Accents[(k / 2) % 3], 30.f * LS, 420.f, false);
+			}
+		}
 		if (JellyM)
 		{
-			const FVector C = KitchenSpot[2] + FVector(0.f, 320.f, 620.f);
-			UStaticMeshComponent* J = AbyssAssets::AddPart(this, Root, JellyM, C, FRotator::ZeroRotator, FVector(1.9f, 1.9f, 1.4f), JTent, false);
+			// the big jellyfish floats as a canopy over the display tank in the middle of the room
+			const FVector C = FVector(0.f, 0.f, 1250.f);
+			UStaticMeshComponent* J = AbyssAssets::AddPart(this, Root, JellyM, C, FRotator::ZeroRotator, FVector(0.001f), JTent, false);   // (kept only as an anchor; see below)
+			if (J) J->SetVisibility(false);   // its tentacles hung down through the display tank
 			SetSlot(J, TEXT("Bell"), JBell);
 			SetSlot(J, TEXT("Glow"), JCore);
 			if (J) J->ComponentTags.Add(TEXT("JellyLamp"));
 			for (int32 k = 0; k < 6; ++k)
 			{
-				const FVector P = C + FRotator(0.f, k * 60.f, 0.f).Vector() * 230.f - FVector(0.f, 0.f, 40.f + 30.f * (k % 2));
-				UStaticMeshComponent* Jk = AbyssAssets::AddPart(this, Root, JellyM, P, FRotator(0.f, k * 40.f, 0.f), FVector(0.75f, 0.75f, 0.6f), JTent, false);
+				const FVector P = C + FRotator(0.f, k * 60.f, 0.f).Vector() * 520.f - FVector(0.f, 0.f, 420.f + 60.f * (k % 2));
+				UStaticMeshComponent* Jk = AbyssAssets::AddPart(this, Root, JellyM, P, FRotator(0.f, k * 40.f, 0.f), P.Y < 100.f ? FVector(0.001f) : FVector(0.75f, 0.75f, 0.6f), JTent, false);
 				SetSlot(Jk, TEXT("Bell"), JBell);
 				SetSlot(Jk, TEXT("Glow"), JCore);
 				if (Jk) Jk->ComponentTags.Add(TEXT("JellyLamp"));
+				// keep the view from the kitchen to the tank clear: only the three on the far side stay
+				if (Jk && P.Y < 100.f) Jk->SetVisibility(false);
 			}
 			AddPointLight(this, Root, C - FVector(0.f, 0.f, 120.f), FLinearColor(1.f, 0.7f, 0.75f), 120.f * LS, 1300.f, false);
 		}
