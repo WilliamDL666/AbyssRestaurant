@@ -86,8 +86,8 @@ public:
 	// yaw that turns the Tripo kitchen models so their front faces the cook
 	UPROPERTY(EditAnywhere, Category = "Dome|Lux") float KitchenModelYaw = 0.f;
 	// kitchen line behind the bar (dome-local Y), gap between pieces, how far in front of a piece the cook stands
-	UPROPERTY(EditAnywhere, Category = "Dome|Lux") float KitchenRowY = -1180.f;
-	UPROPERTY(EditAnywhere, Category = "Dome|Lux") float KitchenIslandY = -800.f;
+	UPROPERTY(EditAnywhere, Category = "Dome|Lux") float KitchenRowY = -225.f;    // the kitchen stands in the middle of the room, behind glass
+	UPROPERTY(EditAnywhere, Category = "Dome|Lux") float KitchenIslandY = 155.f;
 	// half width of the U-shaped kitchen enclosure
 	UPROPERTY(EditAnywhere, Category = "Dome|Lux") float KitchenHalfW = 460.f;
 	UPROPERTY(EditAnywhere, Category = "Dome|Lux") float KitchenGap = 18.f;
@@ -112,6 +112,20 @@ public:
 	int32 CarryDish = -1;
 	bool bCarryPrime = false;      // made with a prime catch
 	bool bHasBooths = false;
+	TArray<FDomeSeat> BoothSeats;   // one seat per booth, added to the lux seats
+	// where the display tank stands (dome-local): the old kitchen site, now that the kitchen is in the middle
+	FVector GetTankLocal() const { return FVector(0.f, -1010.f, 0.f); }
+	// swing doors of the glazed kitchen: pushed open by whoever walks up to them
+	UPROPERTY(Transient) TObjectPtr<USceneComponent> DoorHinge[2];
+	float DoorOpen = 0.f;       // -1..1: which way the leaves have swung
+	bool bDoorWanted = false;   // [F] toggles
+	float DoorSide = 1.f;
+	float DoorAway = 0.f;       // seconds the cook has been away from an open door (it falls shut)
+	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> DoorBlock;
+	// is this world position close enough to work the kitchen door?
+	bool IsNearDoor(const FVector& World) const;
+	bool IsDoorOpen() const { return bDoorWanted; }
+	void ToggleDoor(const FVector& FromWorld);
 	int32 CarryMain = 0, CarrySide = 0;   // seasoning / garnish actually used
 	bool IsCarrying() const { return CarryFor.IsValid(); }
 	ARestaurantCustomer* GetCarryTarget() const { return CarryFor.Get(); }
@@ -135,7 +149,11 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Service") float BasePatience = 70.f;
 	// which way the user's fridge / booth models face (their fronts are not on the same axis)
 	UPROPERTY(EditAnywhere, Category = "Lux") float FridgeYaw = 0.f;
-	UPROPERTY(EditAnywhere, Category = "Lux") float BoothYaw = 90.f;
+	UPROPERTY(EditAnywhere, Category = "Lux") float BoothYaw = 180.f;
+	// facing of the kitchen props: hood, porthole, oven, plate cabinet, menu board, herb planter, crates, barrel, ice crate
+	// how far the showcase map's bar group is pushed away from the kitchen (cm)
+	UPROPERTY(EditAnywhere, Category = "Lux") float BarShift = 260.f;
+	float KPropYaw[9] = { 90.f, 90.f, 90.f, 0.f, 90.f, 0.f, 0.f, 0.f, 0.f };
 
 	FTransform GetDockSpawn() const;
 	FVector GetDockLocation() const { return GetActorTransform().TransformPosition(DockLocal()); }

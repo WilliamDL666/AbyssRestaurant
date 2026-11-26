@@ -112,6 +112,14 @@ void ARestaurantWalker::SetupPlayerInputComponent(UInputComponent* IC)
 	IC->BindAction(TEXT("Interact"), IE_Pressed, this, &ARestaurantWalker::Interact);
 }
 
+void ARestaurantWalker::UseDoor()
+{
+	AAbyssGameMode* GM = AAbyssGameMode::Get(this);
+	ARestaurantDome* D = GM ? GM->GetDome() : nullptr;
+	if (!D || GM->Phase != EAbyssPhase::Restaurant || D->Counter.bOpen) return;
+	if (D->IsNearDoor(GetActorLocation())) D->ToggleDoor(GetActorLocation());
+}
+
 void ARestaurantWalker::Interact()
 {
 	if (AAbyssGameMode* GM = AAbyssGameMode::Get(this)) GM->RestaurantInteract();

@@ -48,4 +48,5 @@ private:
 	void Turn(float V);
 	void LookUp(float V);
 	void Interact();
+	void UseDoor();
 };

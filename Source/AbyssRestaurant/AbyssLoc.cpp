@@ -105,6 +105,20 @@ namespace
 
 	// Phrase replacements (applied longest first)
 	const FPair GPhrases[] = {
+		{ TEXT("TUTORIAL LEVEL"), TEXT("教 学 关 卡") },
+		{ TEXT("This practice day does not count: battery and oxygen never run out,"), TEXT("这一天是练习，不计入正式天数：电量和氧气不会耗尽，") },
+		{ TEXT("guests are patient, and Day 1 begins once tonight's service is over."), TEXT("客人也更有耐心。今晚营业结束后，正式进入第 1 天。") },
+		{ TEXT("[Enter] start the tutorial          [F1] skip to Day 1"), TEXT("[回车] 开始教学          [F1] 跳过，直接进入第 1 天") },
+		{ TEXT("Night 0 Complete"), TEXT("教学关卡结束") },
+		{ TEXT("Day 0"), TEXT("教学关卡") },
+		{ TEXT("The kitchen is behind glass: walk up to its doors and they swing open."), TEXT("厨房在玻璃房里：走到门前，门会自动打开。") },
+		{ TEXT("Go back in through the kitchen doors, walk behind the counter"), TEXT("从厨房门回去，走到料理台后面，") },
+		{ TEXT("and press [E] to start cooking."), TEXT("按 [E] 开始做菜。") },
+		{ TEXT("[F]  Close the kitchen door"), TEXT("[F]  关上厨房门") },
+		{ TEXT("[F]  Open the kitchen door"), TEXT("[F]  打开厨房门") },
+		{ TEXT("Welcome back - Day "), TEXT("欢迎回来 - 第 ") },
+		{ TEXT(".   [F1] tutorial   [F8] new game"), TEXT("   [F1] 教程   [F8] 重新开始") },
+		{ TEXT("Press [F8] again to erase the save and start a new game"), TEXT("再按一次 [F8] 清除存档并重新开始") },
 		{ TEXT("Tutorial skipped - press [F1] to bring it back"), TEXT("已跳过教程 - 按 [F1] 可以重新打开") },
 		{ TEXT("[F1] Tutorial"), TEXT("[F1] 新手教程") },
 		{ TEXT("[F1] skip tutorial"), TEXT("[F1] 跳过教程") },

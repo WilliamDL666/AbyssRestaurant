@@ -188,7 +188,7 @@ void AAbyssHUD::DrawHUD()
 	case EAbyssPhase::Ending:     DrawEnding(GM); break;
 	}
 	if (GM->IsTutorial()) DrawTutorial(GM);
-	else if (GM->Phase == EAbyssPhase::Explore && GM->Day == 1) Text(TEXT("[F1] Tutorial"), Canvas->ClipX - 24.f * S, Canvas->ClipY - 22.f * S, 13.f, FLinearColor(0.7f, 0.82f, 0.85f, 0.7f), false, true);
+	else if (GM->Phase == EAbyssPhase::Explore && GM->Day <= 1) Text(TEXT("[F1] Tutorial"), Canvas->ClipX - 24.f * S, Canvas->ClipY - 22.f * S, 13.f, FLinearColor(0.7f, 0.82f, 0.85f, 0.7f), false, true);
 	DrawToast(GM);
 }
 

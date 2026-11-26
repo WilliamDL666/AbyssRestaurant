@@ -8,6 +8,7 @@
 #include "CatchableFish.h"
 #include "AquariumTank.h"
 #include "AbyssSfx.h"
+#include "AbyssSave.h"
 #include "EngineUtils.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
@@ -50,7 +51,11 @@ void AAbyssGameMode::StartPlay()
 	UE_LOG(LogAbyss, Log, TEXT("StartPlay: ServiceDome=%s DockDome=%s AutoTest=%d"),
 		ServiceDome.IsValid() ? *ServiceDome->GetName() : TEXT("none"), DockDome.IsValid() ? *DockDome->GetName() : TEXT("none"), bAutoTest ? 1 : 0);
 	Super::StartPlay();
-	if (!bAutoTest) StartTutorial();
+	if (LoadGame())
+	{
+		ShowToast(FString::Printf(TEXT("Welcome back - Day %d.   [F1] tutorial   [F8] new game"), Day), FLinearColor(0.6f, 0.95f, 1.f), 6.f);
+	}
+	else if (!bAutoTest) StartTutorial();
 	else ShowToast(TEXT("Day 1 - Find fish. Hover & press [E] to dive out with net/speargun. Dock with [E]."), FLinearColor(0.6f, 0.95f, 1.f), 7.f);
 }
 
@@ -58,6 +63,7 @@ void AAbyssGameMode::Tick(float Dt)
 {
 	Super::Tick(Dt);
 	ToastTime = FMath::Max(0.f, ToastTime - Dt);
+	NewGameArmed = FMath::Max(0.f, NewGameArmed - Dt);
 	if (Phase == EAbyssPhase::Ending) EndingTime += Dt;
 	if (bAutoTest) TickAutoTest(Dt);
 	if (bTutorial) TickTutorial(Dt);
@@ -192,7 +198,7 @@ void AAbyssGameMode::RefreshTank()
 	{
 		FActorSpawnParameters P;
 		P.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		TankActor = GetWorld()->SpawnActor<AAquariumTank>(AAquariumTank::StaticClass(), Dome->GetActorLocation(), Dome->GetActorRotation(), P);
+		TankActor = GetWorld()->SpawnActor<AAquariumTank>(AAquariumTank::StaticClass(), Dome->GetActorTransform().TransformPosition(Dome->GetTankLocal()), Dome->GetActorRotation(), P);
 	}
 	if (TankActor.IsValid()) TankActor->SetFish(Tank);
 }
@@ -685,6 +691,7 @@ void AAbyssGameMode::StartNextDay()
 		Pantry[i][AbyssData::MaxShelf - 1] = 0;
 	}
 	Bait = FMath::Max(Bait, 2);
+	SaveGame();
 
 	ASubmarinePawn* S = GetSub();
 	ARestaurantDome* Dome = ServiceDome.Get();
@@ -848,9 +855,9 @@ void AAbyssGameMode::TickAutoTest(float Dt)
 	}
 	{
 		static bool bTutOn = false, bTutShot = false, bTutOff = false;
-		if (AutoTestStep == 5 && AutoTestTime >= 24.4f && !bTutOn) { bTutOn = true; bTutorial = true; TutStep = 4; }
-		if (AutoTestStep == 5 && AutoTestTime >= 24.8f && !bTutShot) { bTutShot = true; Shot(TEXT("01f_tutorial.png")); }
-		if (AutoTestStep >= 6 && !bTutOff) { bTutOff = true; bTutorial = false; }
+		if (AutoTestStep == 5 && AutoTestTime >= 24.25f && !bTutOn) { bTutOn = true; bTutorial = true; TutStep = 0; }
+		if (AutoTestStep == 5 && AutoTestTime >= 24.5f && !bTutShot) { bTutShot = true; Shot(TEXT("01f_tutorial.png")); }
+		if (AutoTestTime >= 24.7f && bTutShot && !bTutOff) { bTutOff = true; bTutorial = false; }
 	}
 	// close-ups of the three fish (and the grouper's den) between the diver shots and the explore shot
 	{
@@ -950,8 +957,8 @@ void AAbyssGameMode::TickAutoTest(float Dt)
 		const FVector A = ServiceDome->GetStationLocation(EKitchenStep::Slice), B = ServiceDome->GetStationLocation(EKitchenStep::Cook);
 		const FTransform DT = ServiceDome->GetActorTransform();
 		(void)A; (void)B;
-		const FVector Mid = DT.TransformPosition(FVector(0.f, -1000.f, 60.f));
-		const FVector CamLoc = DT.TransformPosition(FVector(-250.f, 80.f, 520.f));
+		const FVector Mid = DT.TransformPosition(FVector(0.f, -60.f, 90.f));
+		const FVector CamLoc = DT.TransformPosition(FVector(-880.f, 1050.f, 640.f));
 		if (ACameraActor* Cam = GetWorld()->SpawnActor<ACameraActor>(CamLoc, (Mid - CamLoc).Rotation()))
 		{
 			Cam->GetCameraComponent()->SetFieldOfView(75.f);
@@ -1101,4 +1108,77 @@ void AAbyssGameMode::TickAutoTest(float Dt)
 	case 16: Phase = EAbyssPhase::Summary; break;
 	case 17: Shot(TEXT("07_ending.png")); FPlatformMisc::RequestExit(false); break;
 	}
+}
+
+// ------------------------------------------------------------------ save game
+
+namespace { const TCHAR* GSaveSlot = TEXT("AbyssDining"); }
+
+void AAbyssGameMode::SaveGame()
+{
+	if (bAutoTest) return;
+	UAbyssSave* S = Cast<UAbyssSave>(UGameplayStatics::CreateSaveGameObject(UAbyssSave::StaticClass()));
+	if (!S) return;
+	S->Money = Money; S->Day = Day;
+	S->Stock.Append(Stock, AbyssData::NumFish); S->Prime.Append(Prime, AbyssData::NumFish); S->Live.Append(Live, AbyssData::NumFish);
+	S->BatteryLevel = BatteryLevel; S->LightLevel = LightLevel; S->OxygenLevel = OxygenLevel; S->RestaurantTier = RestaurantTier;
+	S->Satisfaction = Satisfaction; S->LifetimeServed = LifetimeServed; S->bEndingShown = bEndingShown;
+	for (int32 i = 0; i < AbyssData::NumSeason; ++i) for (int32 d = 0; d < AbyssData::MaxShelf; ++d) S->Pantry.Add(Pantry[i][d]);
+	S->MenuMain.Append(MenuMain, AbyssData::NumDishes); S->MenuSide.Append(MenuSide, AbyssData::NumDishes);
+	S->Bait = Bait;
+	for (const FTankFish& T : Tank) { S->TankType.Add((uint8)T.Type); S->TankPrime.Add(T.bPrime); }
+	S->TankSlots = TankSlots;
+	S->Studied.Append(Studied, AbyssData::NumFish);
+	UGameplayStatics::SaveGameToSlot(S, GSaveSlot, 0);
+	UE_LOG(LogAbyss, Log, TEXT("Saved: day %d, money %d"), Day, Money);
+}
+
+bool AAbyssGameMode::LoadGame()
+{
+	if (bAutoTest || !UGameplayStatics::DoesSaveGameExist(GSaveSlot, 0)) return false;
+	const UAbyssSave* S = Cast<UAbyssSave>(UGameplayStatics::LoadGameFromSlot(GSaveSlot, 0));
+	if (!S || S->Stock.Num() != AbyssData::NumFish || S->Pantry.Num() != AbyssData::NumSeason * AbyssData::MaxShelf
+		|| S->MenuMain.Num() != AbyssData::NumDishes || S->MenuSide.Num() != AbyssData::NumDishes) return false;
+	Money = S->Money; Day = FMath::Max(1, S->Day);
+	for (int32 i = 0; i < AbyssData::NumFish; ++i)
+	{
+		Stock[i] = FMath::Max(0, S->Stock[i]);
+		Prime[i] = S->Prime.IsValidIndex(i) ? FMath::Clamp(S->Prime[i], 0, Stock[i]) : 0;
+		Live[i] = S->Live.IsValidIndex(i) ? FMath::Clamp(S->Live[i], 0, Stock[i]) : 0;
+		Studied[i] = S->Studied.IsValidIndex(i) ? S->Studied[i] : 0;
+	}
+	BatteryLevel = S->BatteryLevel; LightLevel = S->LightLevel; OxygenLevel = S->OxygenLevel; RestaurantTier = FMath::Clamp(S->RestaurantTier, 0, 2);
+	Satisfaction = S->Satisfaction; LifetimeServed = S->LifetimeServed; bEndingShown = S->bEndingShown;
+	for (int32 i = 0; i < AbyssData::NumSeason; ++i) for (int32 d = 0; d < AbyssData::MaxShelf; ++d) Pantry[i][d] = FMath::Max(0, S->Pantry[i * AbyssData::MaxShelf + d]);
+	for (int32 i = 0; i < AbyssData::NumDishes; ++i)
+	{
+		MenuMain[i] = FMath::Clamp(S->MenuMain[i], 0, AbyssData::NumSeason - 1);
+		MenuSide[i] = FMath::Clamp(S->MenuSide[i], 0, AbyssData::NumSeason - 1);
+	}
+	Bait = FMath::Clamp(S->Bait, 0, MaxBait);
+	TankSlots = FMath::Clamp(S->TankSlots, 3, MaxTankSlots);
+	Tank.Reset();
+	for (int32 i = 0; i < S->TankType.Num() && i < TankSlots; ++i)
+	{
+		FTankFish T;
+		T.Type = (EFishType)FMath::Clamp((int32)S->TankType[i], 0, AbyssData::NumFish - 1);
+		T.bPrime = S->TankPrime.IsValidIndex(i) && S->TankPrime[i];
+		Tank.Add(T);
+	}
+	bLoadedSave = true;
+	UE_LOG(LogAbyss, Log, TEXT("Loaded save: day %d, money %d"), Day, Money);
+	return true;
+}
+
+void AAbyssGameMode::NewGamePressed()
+{
+	if (bAutoTest) return;
+	if (NewGameArmed <= 0.f)
+	{
+		NewGameArmed = 4.f;
+		ShowToast(TEXT("Press [F8] again to erase the save and start a new game"), FLinearColor(1.f, 0.6f, 0.3f), 4.f);
+		return;
+	}
+	UGameplayStatics::DeleteGameInSlot(GSaveSlot, 0);
+	UGameplayStatics::OpenLevel(this, FName(*UGameplayStatics::GetCurrentLevelName(this)));
 }

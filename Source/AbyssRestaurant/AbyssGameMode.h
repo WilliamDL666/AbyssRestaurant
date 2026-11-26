@@ -119,7 +119,14 @@ public:
 	bool bEndingShown = false;
 	float EndingTime = 0.f;
 	// Demo length: after this night's summary the ending plays
-	static constexpr int32 DemoDays = 2;
+	static constexpr int32 DemoDays = 5;
+
+	// --- save game: written at the start of every day, loaded when the game starts
+	bool bLoadedSave = false;
+	float NewGameArmed = 0.f;      // [F8] twice within a few seconds wipes the save and restarts
+	void SaveGame();
+	bool LoadGame();
+	void NewGamePressed();
 
 	FString Toast;
 	FLinearColor ToastColor = FLinearColor::White;

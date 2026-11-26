@@ -2,6 +2,7 @@
 #include "RestaurantCustomer.h"
 #include "AbyssGameMode.h"
 #include "AbyssSfx.h"
+#include "Kismet/GameplayStatics.h"
 #include "AbyssAssets.h"
 #include "AbyssTypes.h"
 #include "Camera/CameraComponent.h"
@@ -640,6 +641,27 @@ void ARestaurantDome::SpawnCustomer()
 	--ToSpawn;
 }
 
+bool ARestaurantDome::IsNearDoor(const FVector& World) const
+{
+	if (!DoorHinge[0]) return false;
+	const FVector L = GetActorTransform().InverseTransformPosition(World);
+	return FMath::Abs(L.X) < 190.f && FMath::Abs(L.Y - (KitchenIslandY + 160.f)) < 230.f;
+}
+
+void ARestaurantDome::ToggleDoor(const FVector& FromWorld)
+{
+	if (!DoorHinge[0]) return;
+	bDoorWanted = !bDoorWanted;
+	DoorAway = 0.f;
+	if (bDoorWanted)
+	{
+		// the leaves swing away from whoever opens them
+		const FVector L = GetActorTransform().InverseTransformPosition(FromWorld);
+		DoorSide = L.Y < KitchenIslandY + 160.f ? 1.f : -1.f;
+	}
+	AbyssSfx::Play(this, bDoorWanted ? TEXT("Whoosh") : TEXT("Thunk"), bDoorWanted ? 0.6f : 0.4f, bDoorWanted ? 0.8f : 1.2f);
+}
+
 void ARestaurantDome::GetQueue(TArray<ARestaurantCustomer*>& Out) const
 {
 	Out.Reset();
@@ -893,6 +915,28 @@ void ARestaurantDome::Tick(float Dt)
 		}
 	}
 
+	// kitchen swing doors: pushed open by the cook, they fall shut again
+	if (DoorHinge[0] && DoorHinge[1])
+	{
+		// swing doors: they open by themselves, away from the cook, as soon as he walks up, and fall shut behind him
+		{
+			const APawn* Pl = UGameplayStatics::GetPlayerPawn(this, 0);
+			const bool bNear = Pl && IsNearDoor(Pl->GetActorLocation());
+			if (bNear && !bDoorWanted)
+			{
+				const FVector L = GetActorTransform().InverseTransformPosition(Pl->GetActorLocation());
+				DoorSide = L.Y < KitchenIslandY + 160.f ? 1.f : -1.f;
+				AbyssSfx::Play(this, TEXT("Whoosh"), 0.55f, 0.8f);
+			}
+			DoorAway = bNear ? 0.f : DoorAway + Dt;
+			bDoorWanted = bNear || (bDoorWanted && DoorAway < 0.6f);
+		}
+		DoorOpen = FMath::FInterpTo(DoorOpen, bDoorWanted ? DoorSide : 0.f, Dt, bDoorWanted ? 8.f : 3.5f);
+		if (DoorBlock) DoorBlock->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		DoorHinge[0]->SetRelativeRotation(FRotator(0.f, DoorOpen * 95.f, 0.f));
+		DoorHinge[1]->SetRelativeRotation(FRotator(0.f, -DoorOpen * 95.f, 0.f));
+	}
+
 	// jellyfish lamps drift gently
 	if (!bJellyCached)
 	{
@@ -904,7 +948,7 @@ void ARestaurantDome::Tick(float Dt)
 			if (!C->ComponentHasTag(TEXT("JellyLamp"))) continue;
 			// nothing hangs into the display tank in the middle of the room
 			const FVector RL = C->GetRelativeLocation();
-			const bool bOverTank = FVector2D(RL.X, RL.Y).Size() < 360.f;
+			const bool bOverTank = FVector2D(RL.X - GetTankLocal().X, RL.Y - GetTankLocal().Y).Size() < 360.f;
 			const bool bInKitchen = FMath::Abs(RL.X) < KitchenHalfW + 80.f && RL.Y > KitchenRowY - 140.f && RL.Y < KitchenIslandY + 260.f;
 			if (bUseLuxLevel && (bOverTank || bInKitchen)) { C->SetRelativeScale3D(FVector(0.001f)); C->SetCastShadow(false); continue; }
 			JellyLamps.Add({ C, RL, (float)C->GetRelativeRotation().Yaw });
@@ -1707,10 +1751,12 @@ bool ARestaurantDome::BuildLuxInterior()
 			{ TEXT("Green"), FLinearColor(0.12f, 0.42f, 0.15f), 0.6f, 0.f, 0.f }, { TEXT("Red"), FLinearColor(0.65f, 0.1f, 0.07f), 0.5f, 0.f, 0.f },
 			{ TEXT("Yellow"), FLinearColor(0.9f, 0.72f, 0.12f), 0.5f, 0.f, 0.f }, { TEXT("Glass"), FLinearColor(0.5f, 0.7f, 0.75f), 0.1f, 0.2f, 0.f },
 			{ TEXT("Rope"), FLinearColor(0.6f, 0.5f, 0.33f), 0.9f, 0.f, 0.f }, { TEXT("Slate"), FLinearColor(0.05f, 0.06f, 0.07f), 0.7f, 0.f, 0.f } };
+		UMaterialInterface* PaneM = AbyssAssets::Glass(this, FLinearColor(0.12f, 0.3f, 0.42f), 0.025f);   // barely there: a faint cool tint
 		const TArray<FStaticMaterial>& KSlots = KitSet->GetStaticMaterials();
 		for (int32 i = 0; KC && i < KSlots.Num(); ++i)
 		{
 			const FString N = KSlots[i].MaterialSlotName.ToString();
+			if (N.StartsWith(TEXT("Pane"))) { KC->SetMaterial(i, PaneM); continue; }
 			for (const FSlotLook& Lk : Looks)
 			{
 				// (NavyLight / WoodLight are listed before Navy / Wood so the longer name wins)
@@ -1725,8 +1771,50 @@ bool ARestaurantDome::BuildLuxInterior()
 				if (UStaticMeshComponent* B = AddPart(this, Root, Cube(), At, FRotator::ZeroRotator, Size / 100.f, nullptr, true)) B->SetVisibility(false);
 			};
 			Block(FVector(0.f, KY0 - 15.f, 135.f), FVector(KitchenHalfW * 2.f + 60.f, 30.f, 270.f));
-			Block(FVector(KitchenHalfW + 15.f, KY0 + KD * 0.4f, 135.f), FVector(30.f, KD * 0.8f, 270.f));
-			Block(FVector(-KitchenHalfW - 15.f, KY0 + KD * 0.275f, 58.f), FVector(30.f, KD * 0.55f, 116.f));
+			// the glazed sides and front stop the cook but not the camera, which may look in through the glass
+			auto GlassBlock = [&](const FVector& At, const FVector& Size)
+			{
+				if (UStaticMeshComponent* B = AddPart(this, Root, Cube(), At, FRotator::ZeroRotator, Size / 100.f, nullptr, true))
+				{
+					B->SetVisibility(false);
+					B->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+					B->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
+				}
+			};
+			GlassBlock(FVector(KitchenHalfW + 13.f, KY0 + KD * 0.5f, 135.f), FVector(26.f, KD, 270.f));
+			GlassBlock(FVector(-KitchenHalfW - 13.f, KY0 + KD * 0.5f, 135.f), FVector(26.f, KD, 270.f));
+			const float DoorHalf = 95.f, SegW = KitchenHalfW + 13.f - DoorHalf - 12.f;
+			for (float SX : { -1.f, 1.f }) GlassBlock(FVector(SX * (DoorHalf + 12.f + SegW * 0.5f), KY0 + KD, 135.f), FVector(SegW, 26.f, 270.f));
+			// the doorway itself is shut until the cook opens the doors with [F]
+			DoorBlock = AddPart(this, Root, Cube(), FVector(0.f, KY0 + KD, 135.f), FRotator::ZeroRotator, FVector(DoorHalf * 2.f / 100.f, 0.26f, 2.7f), nullptr, true);
+			if (DoorBlock)
+			{
+				DoorBlock->SetVisibility(false);
+				DoorBlock->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+				DoorBlock->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
+			}
+			// swing doors: brass-framed glass leaves hinged on the jambs
+			UMaterialInterface* DoorBrass = Lit(this, FLinearColor(0.85f, 0.6f, 0.25f), 0.25f, 1.f);
+			for (int32 d = 0; d < 2; ++d)
+			{
+				const float SX = d == 0 ? -1.f : 1.f;
+				USceneComponent* Hinge = NewObject<USceneComponent>(this);
+				Hinge->CreationMethod = EComponentCreationMethod::UserConstructionScript;
+				Hinge->SetupAttachment(Root);
+				Hinge->RegisterComponent();
+				Hinge->SetRelativeLocation(FVector(SX * DoorHalf, KY0 + KD, 7.f));
+				DoorHinge[d] = Hinge;
+				const float LW = DoorHalf - 2.f;   // leaf width
+				const FVector Mid(-SX * LW * 0.5f, 0.f, 0.f);
+				AddPart(this, Hinge, Cube(), Mid + FVector(0.f, 0.f, 112.f), FRotator::ZeroRotator, FVector(LW / 100.f - 0.1f, 0.03f, 1.9f), PaneM, false);
+				AddPart(this, Hinge, Cube(), Mid + FVector(0.f, 0.f, 12.f), FRotator::ZeroRotator, FVector(LW / 100.f, 0.07f, 0.24f), DoorBrass, false);
+				AddPart(this, Hinge, Cube(), Mid + FVector(0.f, 0.f, 212.f), FRotator::ZeroRotator, FVector(LW / 100.f, 0.07f, 0.1f), DoorBrass, false);
+				for (float E : { 0.f, 1.f }) AddPart(this, Hinge, Cube(), FVector(-SX * LW * E, 0.f, 112.f), FRotator::ZeroRotator, FVector(0.07f, 0.07f, 2.1f), DoorBrass, false);
+				// round window rim + a push plate
+				AddPart(this, Hinge, Cylinder(), Mid + FVector(0.f, 0.f, 150.f), FRotator(0.f, 0.f, 90.f), FVector(0.5f, 0.5f, 0.05f), DoorBrass, false);
+				AddPart(this, Hinge, Cylinder(), Mid + FVector(0.f, 0.f, 150.f), FRotator(0.f, 0.f, 90.f), FVector(0.4f, 0.4f, 0.06f), PaneM, false);
+				AddPart(this, Hinge, Cube(), FVector(-SX * (LW - 14.f), 0.f, 105.f), FRotator::ZeroRotator, FVector(0.12f, 0.09f, 0.4f), DoorBrass, false);
+			}
 		}
 		// work lights: warm over the island and the sink, a cool wash from the portholes
 		AddPointLight(this, Root, Pieces[2].At + FVector(0.f, 0.f, 215.f), FLinearColor(1.f, 0.8f, 0.55f), 30.f * LS, 520.f, false);
@@ -1911,13 +1999,54 @@ bool ARestaurantDome::BuildLuxInterior()
 	};
 	// the seafood display fridge stands on the left side of the kitchen, facing in (mirrors the shelf on the right)
 	PlaceModel(TEXT("/Game/Abyss/Kitchen/SM_SeafoodFridge.SM_SeafoodFridge"), 125.f, FVector(-KitchenHalfW + 58.f, KitchenRowY + 170.f, 0.f), FridgeYaw, true);   // long side along the wall, glass towards the room
+	// the user's kitchen props (third batch). Kitchen coordinates: x across, KY0 = foot of the back wall, +Y to the open front.
+	{
+		const float KY0 = KitchenRowY - 90.f;
+		const FVector StoveAt = Pieces[1].At, IslandAt = Pieces[2].At;
+		#define KPROP(Name) TEXT("/Game/Abyss/Kitchen/SM_K_" Name ".SM_K_" Name)
+		// extractor hood over the stove, against the back wall
+		PlaceModel(KPROP("Hood"), 150.f, FVector(StoveAt.X, KY0 + 62.f, 238.f), KPropYaw[0], false);
+		// two portholes in the tiled band of the back wall
+		for (float PX : { -150.f, 140.f }) PlaceModel(KPROP("Porthole"), 78.f, FVector(PX, KY0 + 7.f, 124.f), KPropYaw[1], false);
+		// bakery oven in the back right corner, plate cabinet on the left behind the fridge
+		PlaceModel(KPROP("Oven"), 165.f, FVector(KitchenHalfW - 62.f, KY0 + 52.f, 7.f), KPropYaw[2], true);
+		PlaceModel(KPROP("PlateCabinet"), 200.f, FVector(-KitchenHalfW + 36.f, KY0 + 455.f, 7.f), KPropYaw[3], true);
+		// menu board on the right wall
+		PlaceModel(KPROP("MenuBoard"), 100.f, FVector(-250.f, KY0 - 38.f, 120.f), KPropYaw[4], false);   // between the oven and the shelf, where it is not hidden
+		// herb planters along the cap of the low left wall
+		for (int32 i = 0; i < 3; ++i) PlaceModel(KPROP("HerbPlanter"), 42.f, FVector(-KitchenHalfW - 15.f, KY0 + 55.f + i * 95.f, 127.f), KPropYaw[5], false);
+		// stores by the right wall near the front: crates of produce, the barrel; the day's catch on ice on the left
+		PlaceModel(KPROP("Crates"), 105.f, FVector(KitchenHalfW - 48.f, KY0 + 545.f, 7.f), KPropYaw[6], true);
+		PlaceModel(KPROP("Barrel"), 92.f, FVector(KitchenHalfW - 130.f, KY0 + 585.f, 7.f), KPropYaw[7], true);
+		PlaceModel(KPROP("IceCrate"), 58.f, FVector(-KitchenHalfW + 150.f, KY0 + 575.f, 7.f), KPropYaw[8], true);
+		// three pendant lamps over the island, high enough to stay out of the cook's view
+		for (int32 i = -1; i <= 1; ++i)
+		{
+			if (PlaceModel(KPROP("Pendant"), 95.f, IslandAt + FVector(i * 125.f, 0.f, 365.f), 0.f, false))
+				AddPart(this, Root, Sphere(), IslandAt + FVector(i * 125.f, 0.f, 369.f), FRotator::ZeroRotator, FVector(0.12f), Lit(this, FLinearColor(1.f, 0.78f, 0.45f), 0.3f, 0.f, 7.f), false);
+		}
+		#undef KPROP
+	}
 	// three booths on the far side of the display tank, backs to the room, open towards the fish
 	bHasBooths = false;
+	BoothSeats.Reset();
 	for (int32 k = 0; k < 3; ++k)
 	{
-		const float A = FMath::DegreesToRadians(30.f + k * 60.f);
+		// left, right, and one between the tank and the kitchen's back wall
+		const float A = FMath::DegreesToRadians(k == 0 ? 8.f : k == 1 ? 90.f : 172.f);
 		const FVector Dir(FMath::Cos(A), FMath::Sin(A), 0.f);
-		bHasBooths |= PlaceModel(TEXT("/Game/Abyss/Props/SM_Booth.SM_Booth"), 150.f, Dir * 410.f, FMath::RadiansToDegrees(A) + BoothYaw, true);
+		const FVector At = GetTankLocal() + Dir * (k == 1 ? 455.f : 500.f);
+		if (!PlaceModel(TEXT("/Game/Abyss/Props/SM_Booth.SM_Booth"), 150.f, At, FMath::RadiansToDegrees(A) + BoothYaw, true)) continue;
+		bHasBooths = true;
+		// the booth opens along its local +X; with BoothYaw 180 that is towards the tank. The guest sits on the
+		// sofa at the back and faces the little table (and the fish beyond it).
+		const FVector Open = FRotator(0.f, FMath::RadiansToDegrees(A) + BoothYaw, 0.f).Vector();
+		FDomeSeat S;
+		S.Loc = At - Open * 24.f;
+		S.Table = At + Open * 34.f + FVector(0.f, 0.f, 0.f);
+		S.Yaw = Open.Rotation().Yaw;
+		S.Tier = 0;
+		BoothSeats.Add(S);
 	}
 	KitchenSpot[0] = Pieces[3].At + FVector(0.f, KitchenStandOff, 0.f);   // slice: prep table
 	KitchenSpot[1] = Pieces[1].At + FVector(0.f, KitchenStandOff, 0.f);   // cook: stove
@@ -1983,17 +2112,17 @@ bool ARestaurantDome::BuildLuxInterior()
 		{
 			UMaterialInterface* RimM = Lit(this, FLinearColor(0.85f, 0.6f, 0.25f), 0.25f, 1.f);
 			UMaterialInterface* InlayM = Lit(this, FLinearColor(0.03f, 0.07f, 0.2f), 0.18f, 0.3f);
-			AbyssAssets::AddPart(this, Root, AbyssAssets::Cylinder(), FVector(0.f, 0.f, 1.2f), FRotator::ZeroRotator, FVector(9.2f, 9.2f, 0.02f), RimM, false);
-			AbyssAssets::AddPart(this, Root, AbyssAssets::Cylinder(), FVector(0.f, 0.f, 1.6f), FRotator::ZeroRotator, FVector(8.9f, 8.9f, 0.02f), InlayM, false);
-			AbyssAssets::AddPart(this, Root, AbyssAssets::Cylinder(), FVector(0.f, 0.f, 2.f), FRotator::ZeroRotator, FVector(5.4f, 5.4f, 0.02f), RimM, false);
-			AbyssAssets::AddPart(this, Root, AbyssAssets::Cylinder(), FVector(0.f, 0.f, 2.4f), FRotator::ZeroRotator, FVector(5.2f, 5.2f, 0.02f), InlayM, false);
+			AbyssAssets::AddPart(this, Root, AbyssAssets::Cylinder(), GetTankLocal() + FVector(0.f, 0.f, 1.2f), FRotator::ZeroRotator, FVector(9.2f, 9.2f, 0.02f), RimM, false);
+			AbyssAssets::AddPart(this, Root, AbyssAssets::Cylinder(), GetTankLocal() + FVector(0.f, 0.f, 1.6f), FRotator::ZeroRotator, FVector(8.9f, 8.9f, 0.02f), InlayM, false);
+			AbyssAssets::AddPart(this, Root, AbyssAssets::Cylinder(), GetTankLocal() + FVector(0.f, 0.f, 2.f), FRotator::ZeroRotator, FVector(5.4f, 5.4f, 0.02f), RimM, false);
+			AbyssAssets::AddPart(this, Root, AbyssAssets::Cylinder(), GetTankLocal() + FVector(0.f, 0.f, 2.4f), FRotator::ZeroRotator, FVector(5.2f, 5.2f, 0.02f), InlayM, false);
 			for (int32 k = 0; k < 8; ++k)
 			{
 				const float A = 2.f * PI * (k + 0.5f) / 8.f;
 				const FVector Dir(FMath::Cos(A), FMath::Sin(A), 0.f);
 				const int32 c = k % 3;
-				if (CoralMs[c] && !(bHasBooths && Dir.Y > 0.f)) AbyssAssets::AddPart(this, Root, CoralMs[c], Dir * 330.f, FRotator(0.f, k * 47.f, 0.f), FVector(c == 2 ? 0.7f : 1.1f), CoralMats[c], false);
-				if (k % 2 == 0) AddPointLight(this, Root, Dir * 360.f + FVector(0.f, 0.f, 60.f), Accents[(k / 2) % 3], 30.f * LS, 420.f, false);
+				if (CoralMs[c] && !(bHasBooths && Dir.Y > -0.5f)) AbyssAssets::AddPart(this, Root, CoralMs[c], GetTankLocal() + Dir * 330.f, FRotator(0.f, k * 47.f, 0.f), FVector(c == 2 ? 0.7f : 1.1f), CoralMats[c], false);
+				if (k % 2 == 0) AddPointLight(this, Root, GetTankLocal() + Dir * 360.f + FVector(0.f, 0.f, 60.f), Accents[(k / 2) % 3], 30.f * LS, 420.f, false);
 			}
 		}
 		if (JellyM)
@@ -2050,6 +2179,16 @@ void ARestaurantDome::GatherLuxSeats()
 	Seats.Reset();
 	const FTransform DT = GetActorTransform();
 	TArray<FVector> Chairs, Tables;
+	// the bar of the showcase map stood right beside the kitchen: push that whole group outwards for a wide aisle
+	for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+	{
+		AActor* A = *It;
+		if (A == this || A->GetLevel() == GetLevel() || !A->GetRootComponent() || A->IsA<APawn>()) continue;
+		const FVector L = DT.InverseTransformPosition(A->GetActorLocation());
+		if (L.X < 540.f || L.X > 1760.f || L.Y < -780.f || L.Y > 180.f || L.Z > 900.f) continue;
+		A->GetRootComponent()->SetMobility(EComponentMobility::Movable);
+		A->SetActorLocation(A->GetActorLocation() + DT.TransformVector(FVector(BarShift, 0.f, 0.f)));
+	}
 	for (TActorIterator<AStaticMeshActor> It(GetWorld()); It; ++It)
 	{
 		const UStaticMeshComponent* SMC = It->GetStaticMeshComponent();
@@ -2057,6 +2196,18 @@ void ARestaurantDome::GatherLuxSeats()
 		if (!M) continue;
 		const FVector L = DT.InverseTransformPosition(It->GetActorLocation());
 		if (FVector2D(L.X, L.Y).Size() > Radius) continue;
+		{
+			// the kitchen now stands in the middle of the room: whatever of the showcase map is inside it (or inside the
+			// tank's circle) is cleared away
+			const bool bInKitchen = FMath::Abs(L.X) < KitchenHalfW + 85.f && L.Y > KitchenRowY - 190.f && L.Y < KitchenIslandY + 250.f;
+			const bool bAtTank = FVector2D(L.X - GetTankLocal().X, L.Y - GetTankLocal().Y).Size() < 300.f;
+			if ((bInKitchen || bAtTank) && L.Z < 500.f)
+			{
+				It->SetActorHiddenInGame(true);
+				It->SetActorEnableCollision(false);
+				continue;
+			}
+		}
 		const FString N = M->GetName();
 		if (N.Contains(TEXT("Chair"))) Chairs.Add(L);
 		else if (N.Contains(TEXT("_Table_"))) Tables.Add(L);
@@ -2089,7 +2240,8 @@ void ARestaurantDome::GatherLuxSeats()
 		S.Tier = i < 12 ? 0 : i < 21 ? 1 : 2;
 		Seats.Add(S);
 	}
-	UE_LOG(LogTemp, Log, TEXT("Lux interior: %d chairs, %d tables -> %d seats"), Chairs.Num(), Tables.Num(), Seats.Num());
+	Seats.Append(BoothSeats);
+	UE_LOG(LogTemp, Log, TEXT("Lux interior: %d chairs, %d tables -> %d seats (%d in booths)"), Chairs.Num(), Tables.Num(), Seats.Num(), BoothSeats.Num());
 }
 
 

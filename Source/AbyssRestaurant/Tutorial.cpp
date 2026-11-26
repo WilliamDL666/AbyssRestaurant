@@ -25,6 +25,8 @@ void AAbyssGameMode::StartTutorial()
 	TutStep = 0;
 	TutTime = TutMoved = 0.f;
 	bTutSawAquarium = false;
+	// the tutorial is its own level before the real game: "day 0". Day 1 starts after its night has been closed.
+	Day = 0;
 	SpawnTutorialFish();
 }
 
@@ -33,6 +35,8 @@ void AAbyssGameMode::ToggleTutorial()
 	if (bTutorial)
 	{
 		bTutorial = false;
+		// skipped before it really began: this is simply day 1 then
+		if (Day == 0 && Phase == EAbyssPhase::Explore && CargoCount() == 0) Day = 1;
 		ShowToast(TEXT("Tutorial skipped - press [F1] to bring it back"), FLinearColor(0.6f, 0.95f, 1.f), 3.f);
 		return;
 	}
@@ -153,8 +157,10 @@ void AAbyssGameMode::TutorialText(FString& Title, TArray<FString>& L) const
 	switch (TutStep)
 	{
 	case 0:
-		Title = TEXT("Welcome to Abyss Dining");
-		L = { TEXT("By day you catch fish from your submarine. By night you cook them."), TEXT("How well you catch a fish decides what its dish sells for."), TEXT("[Enter] start the tutorial     [F1] skip it") };
+		Title = TEXT("TUTORIAL LEVEL");
+		L = { TEXT("By day you catch fish from your submarine. By night you cook them."), TEXT("How well you catch a fish decides what its dish sells for."),
+			TEXT("This practice day does not count: battery and oxygen never run out,"), TEXT("guests are patient, and Day 1 begins once tonight's service is over."),
+			TEXT("[Enter] start the tutorial          [F1] skip to Day 1") };
 		break;
 	case 1:
 		Title = TEXT("Drive the submarine");
@@ -202,11 +208,11 @@ void AAbyssGameMode::TutorialText(FString& Title, TArray<FString>& L) const
 		break;
 	case 12:
 		Title = TEXT("Take an order");
-		L = { TEXT("Guests sit down and wave. Walk up to the one with the [?] bubble"), TEXT("and press [E] to take the order.") };
+		L = { TEXT("The kitchen is behind glass: walk up to its doors and they swing open."), TEXT("Guests sit down and wave. Walk up to the one with the [?] bubble"), TEXT("and press [E] to take the order.") };
 		break;
 	case 13:
 		Title = TEXT("To the kitchen");
-		L = { TEXT("Walk behind the counter in the kitchen and press [E] to start cooking.") };
+		L = { TEXT("Go back in through the kitchen doors, walk behind the counter"), TEXT("and press [E] to start cooking.") };
 		break;
 	case 14:
 	{
@@ -248,6 +254,28 @@ void AAbyssHUD::DrawTutorial(AAbyssGameMode* GM)
 	TArray<FString> Lines;
 	GM->TutorialText(Title, Lines);
 	const float W = Canvas->ClipX, H = Canvas->ClipY;
+	if (GM->TutStep == 0)
+	{
+		// opening card: the game starts here
+		Panel(0.f, 0.f, W, H, FLinearColor(0.f, 0.02f, 0.06f, 0.72f));
+		const float CW = 980.f * S, CH = 600.f * S, CX = W * 0.5f - CW * 0.5f, CY = H * 0.5f - CH * 0.5f;
+		Panel(CX, CY, CW, CH, FLinearColor(0.02f, 0.06f, 0.16f, 0.95f));
+		Border(CX, CY, CW, CH, FLinearColor(1.f, 0.78f, 0.32f, 0.95f), 3.f);
+		Panel(CX, CY, CW, 6.f * S, FLinearColor(1.f, 0.78f, 0.32f, 0.95f));
+		// the logo already carries the game's name
+		if (UTexture2D* Logo = UITex(TEXT("H_Logo"))) { const float LW = 300.f * S; Tex(Logo, W * 0.5f - LW * 0.5f, CY + 18.f * S, LW, LW * Logo->GetSizeY() / FMath::Max(1, Logo->GetSizeX())); }
+		Text(LOCS("ABYSS DINING", "深海食堂"), W * 0.5f, CY + 145.f * S, 24.f, FLinearColor(0.32f, 0.18f, 0.06f), true);   // on the logo's ribbon
+		Panel(CX + 140.f * S, CY + 214.f * S, CW - 280.f * S, 2.f * S, FLinearColor(1.f, 0.78f, 0.32f, 0.6f));
+		Text(Title, W * 0.5f, CY + 226.f * S, 46.f, FLinearColor(1.f, 0.82f, 0.38f), true);
+		for (int32 i = 0; i < Lines.Num(); ++i)
+		{
+			const bool bKeys = i == Lines.Num() - 1;
+			const float Pu = bKeys ? 0.7f + 0.3f * FMath::Sin(Time * 3.5f) : 1.f;
+			Text(Lines[i], W * 0.5f, CY + (310.f + i * 36.f + (bKeys ? 34.f : 0.f)) * S, bKeys ? 24.f : 20.f,
+				bKeys ? FLinearColor(1.f, 0.9f, 0.6f, Pu) : FLinearColor(1.f, 0.96f, 0.86f), true);
+		}
+		return;
+	}
 	// sized to the longest line
 	float TW = TextW(Title, 22.f);
 	for (const FString& Ln : Lines) TW = FMath::Max(TW, TextW(Ln, 16.f));

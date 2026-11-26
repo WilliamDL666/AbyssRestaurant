@@ -30,6 +30,7 @@ private:
 	void ToggleLanguage();
 	void ToggleRecipeBook();
 	void ToggleTutorial();
+	void NewGame();
 	void DebugRestaurant();
 	void UpgradeRestaurant();
 };
